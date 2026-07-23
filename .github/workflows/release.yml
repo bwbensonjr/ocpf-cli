@@ -66,3 +66,46 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      # Scoped to this job only; used to create the GitHub Release.
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Extract release notes from CHANGELOG
+        id: notes
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # Grab the lines under `## [version]` up to the next `## ` heading,
+          # skipping the trailing reference-link definitions.
+          awk -v ver="$version" '
+            /^## \[/ { if (grab) exit; if ($0 ~ ("^## \\[" ver "\\]")) { grab=1; next } }
+            grab && /^\[[^][]+\]: / { next }
+            grab { print }
+          ' CHANGELOG.md > NOTES.md
+          if grep -q '[^[:space:]]' NOTES.md; then
+            echo "have_notes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "have_notes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          # A pre-release suffix (e.g. v1.2.3-rc1) marks a GitHub pre-release.
+          if [[ "$tag" == *-* ]]; then
+            release_flag=--prerelease
+          else
+            release_flag=--latest
+          fi
+          if [ "${{ steps.notes.outputs.have_notes }}" = "true" ]; then
+            gh release create "$tag" --title "$tag" --notes-file NOTES.md "$release_flag"
+          else
+            gh release create "$tag" --title "$tag" --generate-notes "$release_flag"
+          fi
