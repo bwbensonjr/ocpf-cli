@@ -128,6 +128,8 @@ uv run ocpf race 37th   # run the CLI from source
 
 ## Releasing
 
+Notable changes are recorded in [CHANGELOG.md](CHANGELOG.md).
+
 Releases are published to PyPI automatically by GitHub Actions when a version tag
 is pushed. Versioning is tag-driven (via `hatch-vcs`), so the tag is the single
 source of truth for the package version:
