@@ -172,7 +172,9 @@ def _render_table(
     print(render.render_table(table_rows, headers, right_align=right_align))
     print()
     print("* incumbent (holds this seat)")
-    if historical:
+    # Only explain the winner marker when at least one candidate carries it;
+    # OCPF's isWinner is unset for some historical races (e.g. unopposed).
+    if historical and any(row.get("isWinner") for row in rows):
         print("W won the general election")
     if timeline.lagging_filers:
         names = ", ".join(timeline.lagging_filers)
