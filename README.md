@@ -8,18 +8,23 @@ single command.
 
 ## Install
 
-The project is managed with [`uv`](https://docs.astral.sh/uv/).
+Run it with no install at all using [`uvx`](https://docs.astral.sh/uv/):
 
 ```bash
-# From a clone of this repository:
-uv sync                 # install runtime dependencies
-uv sync --extra dev     # ...plus pytest/respx for the test suite
+uvx ocpf race 37th
 ```
 
-Run the CLI without installing it globally:
+Or install the `ocpf` command onto your PATH:
 
 ```bash
-uv run ocpf --help
+pipx install ocpf     # isolated, recommended
+pip install ocpf      # into the current environment
+```
+
+Then:
+
+```bash
+ocpf --help
 ```
 
 ## Usage
@@ -43,7 +48,7 @@ ocpf race <district> [--year <year>] [--json]
 ### Example
 
 ```bash
-$ uv run ocpf race "Suffolk and Middlesex" --year 2026
+$ ocpf race "Suffolk and Middlesex" --year 2026
 District:  Senate, Suffolk and Middlesex (code 166)
 Election:  primary 9/1/2026, general 11/3/2026
 As of:     6/30/2026 (year-to-date, cumulative)
@@ -82,7 +87,7 @@ YTD finances, and most recent reports.
   numeric values) to stdout.
 
 ```bash
-$ uv run ocpf filer "Brownsberger" --year 2026
+$ ocpf filer "Brownsberger" --year 2026
 Filer:      Brownsberger, William N.  (cpfId 14454)
 Committee:  Brownsberger Committee
 Party:      Democratic    Type: Legislative Candidates
@@ -112,10 +117,37 @@ scope. See `openspec/` for the design and specifications.
 
 ## Development
 
+The project is managed with [`uv`](https://docs.astral.sh/uv/). From a clone of
+this repository:
+
 ```bash
-uv run pytest       # run the test suite
-uv run ocpf ...      # run the CLI from source
+uv sync --extra dev     # runtime deps + pytest/respx
+uv run pytest           # run the test suite
+uv run ocpf race 37th   # run the CLI from source
 ```
+
+## Releasing
+
+Releases are published to PyPI automatically by GitHub Actions when a version tag
+is pushed. Versioning is tag-driven (via `hatch-vcs`), so the tag is the single
+source of truth for the package version:
+
+```bash
+git tag v0.1.0
+git push --tags
+```
+
+The release workflow runs the test suite, builds the sdist and wheel, and
+publishes to PyPI using [Trusted Publishing](https://docs.pypi.org/trusted-publishers/)
+(OIDC) — no API token is stored in the repository.
+
+**First release only:** before pushing the first tag, register a *pending*
+Trusted Publisher on PyPI (Your projects → Publishing) so the initial upload can
+create the project:
+
+- PyPI project name: `ocpf`
+- Owner: `bwbensonjr`  ·  Repository: `ocpf-cli`
+- Workflow: `release.yml`  ·  Environment: `pypi`
 
 ## Design Guidelines
 
