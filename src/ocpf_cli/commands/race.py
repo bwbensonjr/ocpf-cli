@@ -17,7 +17,10 @@ from ..districts import DistrictResolutionError, District, resolve_district
 from ..legislative import (
     DEPOSITORY_PATH,
     NON_DEPOSITORY_PATH,
+    fetch_finsummaries,
     fetch_merged_field,
+    has_money,
+    normalize_finsummaries,
     reports_of,
 )
 
@@ -96,6 +99,11 @@ def build_timeline(year: int, rows: list[dict]) -> Timeline:
 
 
 def _is_incumbent(row: dict, code: int) -> bool:
+    # Historical (finsummaries) rows carry an explicit flag and a districtCode of
+    # 0, so they can't be matched on districtCodeHeld; current-cycle rows use the
+    # held-code comparison.
+    if "isIncumbent" in row:
+        return bool(row["isIncumbent"])
     return row.get("districtCodeHeld") == code
 
 
@@ -104,8 +112,18 @@ def _sort_key(row: dict) -> Any:
     return (-(row.get("receiptsYtdNumeric") or 0), row.get("filerName", ""))
 
 
-def _render_table(district: District, rows: list[dict], timeline: Timeline) -> None:
-    """Print the human-readable summary header and table to stdout."""
+def _render_table(
+    district: District,
+    rows: list[dict],
+    timeline: Timeline,
+    historical: bool = False,
+) -> None:
+    """Print the human-readable summary header and table to stdout.
+
+    Current-cycle data renders as a YTD snapshot with an as-of date. Historical
+    (finsummaries) data renders as final full-cycle totals: no as-of line,
+    final-total column labels, and a winner marker.
+    """
     print(f"District:  {district.label} (code {district.code})")
     dates = []
     if timeline.primary_election_date:
@@ -122,32 +140,40 @@ def _render_table(district: District, rows: list[dict], timeline: Timeline) -> N
     table_rows = []
     for row in ordered:
         incumbent = "*" if _is_incumbent(row, district.code) else ""
-        table_rows.append(
-            [
-                row.get("filerName", ""),
-                row.get("partyAffiliation", "") or "-",
-                incumbent,
-                render.format_currency(row.get("receiptsYtdNumeric")),
-                render.format_currency(row.get("expendituresYtdNumeric")),
-                render.format_currency(row.get("currentCashOnHandNumeric")),
-            ]
-        )
+        money = [
+            render.format_currency(row.get("receiptsYtdNumeric")),
+            render.format_currency(row.get("expendituresYtdNumeric")),
+            render.format_currency(row.get("currentCashOnHandNumeric")),
+        ]
+        base = [
+            row.get("filerName", ""),
+            row.get("partyAffiliation", "") or "-",
+            incumbent,
+        ]
+        if historical:
+            won = "W" if row.get("isWinner") else ""
+            table_rows.append(base + [won] + money)
+        else:
+            table_rows.append(base + money)
 
-    headers = [
-        "Candidate",
-        "Party",
-        "Inc",
-        "Raised YTD",
-        "Spent YTD",
-        "Cash on Hand",
-    ]
-    print(
-        render.render_table(
-            table_rows, headers, right_align=[3, 4, 5]
-        )
-    )
+    if historical:
+        headers = ["Candidate", "Party", "Inc", "Won", "Raised", "Spent", "End Bal"]
+        right_align = [4, 5, 6]
+    else:
+        headers = [
+            "Candidate",
+            "Party",
+            "Inc",
+            "Raised YTD",
+            "Spent YTD",
+            "Cash on Hand",
+        ]
+        right_align = [3, 4, 5]
+    print(render.render_table(table_rows, headers, right_align=right_align))
     print()
     print("* incumbent (holds this seat)")
+    if historical:
+        print("W won the general election")
     if timeline.lagging_filers:
         names = ", ".join(timeline.lagging_filers)
         render.status(
@@ -188,6 +214,17 @@ def race(
     try:
         merged = fetch_merged_field(year)
         matched = filter_by_district(merged, resolved.code)
+        historical = False
+        # The current-cycle feeds only carry money from ~2020 on. For earlier
+        # cycles they resolve names but leave the money blank, so fall back to
+        # the district-scoped historical summaries (final full-cycle totals).
+        if not has_money(matched):
+            hist_rows = normalize_finsummaries(
+                fetch_finsummaries(year, resolved.code)
+            )
+            if hist_rows:
+                matched = hist_rows
+                historical = True
         if not matched:
             render.error(
                 f"No candidates found for {resolved.label} (code "
@@ -202,4 +239,4 @@ def race(
     if json_output:
         render.emit_json(sorted(matched, key=_sort_key))
     else:
-        _render_table(resolved, matched, timeline)
+        _render_table(resolved, matched, timeline, historical=historical)

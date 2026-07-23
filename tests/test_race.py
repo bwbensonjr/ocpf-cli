@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+from typer.testing import CliRunner
+
+from ocpf_cli import api
+from ocpf_cli.cli import app
 from ocpf_cli.commands import race
+
+runner = CliRunner()
 
 
 def _dep_feed():
@@ -111,3 +117,145 @@ def test_parse_report_date():
     assert race._parse_report_date("") is None
     assert race._parse_report_date(None) is None
     assert race._parse_report_date("garbage") is None
+
+
+# --- End-to-end source-selection tests (mocked API) ---------------------------
+
+
+def _districts():
+    return [
+        {"office": "House", "code": 294, "description": "37th Middlesex"},
+        {"office": "Senate", "code": 166, "description": "Suffolk and Middlesex"},
+    ]
+
+
+def _finsummaries_2008():
+    return [
+        {
+            "cpfId": 14768,
+            "filerName": "Benson, Jennifer",
+            "districtCode": 0,
+            "partyAffiliation": "Democratic",
+            "isIncumbent": False,
+            "isWinner": True,
+            "receipts": "$63,727.50",
+            "expenditures": "$54,831.01",
+            "endBalance": "$8,896.49",
+        },
+        {
+            "cpfId": 14818,
+            "filerName": "Hayes, Kurt",
+            "districtCode": 0,
+            "partyAffiliation": "Republican",
+            "isIncumbent": False,
+            "isWinner": False,
+            "receipts": "$26,402.00",
+            "expenditures": "$24,652.76",
+            "endBalance": "$1,749.24",
+        },
+    ]
+
+
+def _dispatch(responses, calls=None):
+    """Build a get_json stand-in that returns by path and records calls."""
+
+    def fake(path, *a, **k):
+        if calls is not None:
+            calls.append(path)
+        return responses.get(path, [])
+
+    return fake
+
+
+def test_race_falls_back_to_finsummaries_for_old_year(monkeypatch):
+    calls: list[str] = []
+    responses = {
+        "districts": _districts(),
+        # Current feeds resolve names but carry no money for 2008.
+        race.DEPOSITORY_PATH.format(year=2008): {
+            "reports": [
+                {
+                    "cpfId": 14768,
+                    "filerName": "Benson, Jennifer",
+                    "districtCodeSought": 294,
+                    "districtCodeHeld": -1,
+                }
+            ],
+            "summary": {},
+        },
+        race.NON_DEPOSITORY_PATH.format(year=2008): [],
+        "onballot/finsummaries/2008/294": _finsummaries_2008(),
+        "filingSchedules/2008": {
+            "primaryElectionDate": "9/16/2008",
+            "generalElectionDate": "11/4/2008",
+        },
+    }
+    monkeypatch.setattr(api, "get_json", _dispatch(responses, calls))
+
+    result = runner.invoke(app, ["race", "294", "--year", "2008"])
+
+    assert result.exit_code == 0, result.output
+    # Money from finsummaries is shown.
+    assert "$63,727.50" in result.output
+    assert "$26,402.00" in result.output
+    # Historical mode: final-total labels, winner marker, no as-of line.
+    assert "End Bal" in result.output
+    assert "Won" in result.output
+    assert "W won the general election" in result.output
+    assert "As of" not in result.output
+    # The fallback endpoint was actually consulted.
+    assert "onballot/finsummaries/2008/294" in calls
+
+
+def test_race_uses_current_feeds_and_skips_finsummaries(monkeypatch):
+    calls: list[str] = []
+    responses = {
+        "districts": _districts(),
+        race.DEPOSITORY_PATH.format(year=2026): {
+            "reports": [
+                {
+                    "cpfId": 1,
+                    "filerName": "Alpha",
+                    "partyAffiliation": "Democratic",
+                    "districtCodeSought": 166,
+                    "districtCodeHeld": 166,
+                    "receiptsYtdNumeric": 12345.0,
+                    "expendituresYtdNumeric": 6000.0,
+                    "currentCashOnHandNumeric": 6345.0,
+                    "bankReportEndDate": "6/30/2026",
+                }
+            ],
+            "summary": {},
+        },
+        race.NON_DEPOSITORY_PATH.format(year=2026): [],
+        "filingSchedules/2026": {
+            "primaryElectionDate": "9/1/2026",
+            "generalElectionDate": "11/3/2026",
+        },
+    }
+    monkeypatch.setattr(api, "get_json", _dispatch(responses, calls))
+
+    result = runner.invoke(app, ["race", "166", "--year", "2026"])
+
+    assert result.exit_code == 0, result.output
+    assert "$12,345.00" in result.output
+    # Current-cycle mode: YTD labels and as-of line, no winner column.
+    assert "Raised YTD" in result.output
+    assert "As of" in result.output
+    assert "Won" not in result.output
+    # finsummaries must not be called when the current feeds have money.
+    assert not any(c.startswith("onballot/finsummaries") for c in calls)
+
+
+def test_race_no_candidates_in_either_source_exits_nonzero(monkeypatch):
+    responses = {
+        "districts": _districts(),
+        race.DEPOSITORY_PATH.format(year=2008): {"reports": [], "summary": {}},
+        race.NON_DEPOSITORY_PATH.format(year=2008): [],
+        "onballot/finsummaries/2008/294": [],
+    }
+    monkeypatch.setattr(api, "get_json", _dispatch(responses))
+
+    result = runner.invoke(app, ["race", "294", "--year", "2008"])
+
+    assert result.exit_code == 1

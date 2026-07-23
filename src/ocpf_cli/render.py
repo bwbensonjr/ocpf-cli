@@ -36,6 +36,25 @@ def format_currency(amount: float | int | None) -> str:
     return f"${amount:,.2f}"
 
 
+def parse_currency(value: str | float | int | None) -> float:
+    """Parse a currency string like `$63,727.50` into a float.
+
+    Inverse of `format_currency` for the currency-string fields the historical
+    `finsummaries` feed returns. Blank or unparseable input yields `0.0`.
+    """
+    if value is None:
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    cleaned = value.strip().lstrip("$").replace(",", "")
+    if not cleaned:
+        return 0.0
+    try:
+        return float(cleaned)
+    except ValueError:
+        return 0.0
+
+
 def render_table(
     rows: Sequence[Sequence[Any]],
     headers: Sequence[str],
