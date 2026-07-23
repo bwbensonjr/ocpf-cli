@@ -59,3 +59,34 @@ def test_filer_is_a_named_subcommand():
 def test_unknown_command_errors_nonzero():
     result = runner.invoke(app, ["bogus"])
     assert result.exit_code != 0
+
+
+def test_version_flag():
+    result = runner.invoke(app, ["--version"])
+    assert result.exit_code == 0
+    out = _plain(result.output)
+    assert out.startswith("ocpf ")
+    # A non-empty version token follows the program name.
+    assert out.split("ocpf ", 1)[1].strip()
+
+
+def test_version_short_flag():
+    result = runner.invoke(app, ["-V"])
+    assert result.exit_code == 0
+    assert _plain(result.output).startswith("ocpf ")
+
+
+def test_version_short_circuits_subcommand(monkeypatch):
+    # --version is a top-level option, so it precedes the subcommand name. If it
+    # did not short-circuit, race would call the API; make any API call fail
+    # loudly so the test proves the command never ran.
+    import ocpf_cli.api as api
+
+    def _boom(*a, **k):
+        raise AssertionError("API should not be called when --version is passed")
+
+    monkeypatch.setattr(api, "get_json", _boom)
+
+    result = runner.invoke(app, ["--version", "race"])
+    assert result.exit_code == 0
+    assert _plain(result.output).startswith("ocpf ")

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `ocpf --version` (and `-V`) prints the installed version and exits.
+
 ### Changed
 
 - CI/release workflows: bumped GitHub Actions off Node 20 to current majors
