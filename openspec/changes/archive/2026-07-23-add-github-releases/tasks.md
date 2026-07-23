@@ -21,12 +21,12 @@
 
 ## 3. Backfill existing tags
 
-- [ ] 3.1 Create GitHub Releases for the existing `v0.1.0` and `v0.2.0` tags,
+- [x] 3.1 Create GitHub Releases for the existing `v0.1.0` and `v0.2.0` tags,
   using each version's `CHANGELOG.md` section as the notes.
 
 ## 4. Verification
 
 - [x] 4.1 Confirm the workflow YAML is valid and the new job wiring is correct
   (lint / dry review).
-- [ ] 4.2 After the next release (or a re-run), confirm the GitHub Release exists
+- [x] 4.2 After the next release (or a re-run), confirm the GitHub Release exists
   with CHANGELOG-derived notes and no attached artifacts.
