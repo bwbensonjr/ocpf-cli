@@ -63,3 +63,16 @@ uv sync --extra dev      # install deps + test tooling
 uv run pytest            # run tests
 uv run ocpf race "..."   # run the CLI from source
 ```
+
+## Releasing
+
+Notable changes are recorded in [CHANGELOG.md](CHANGELOG.md).
+
+Releases are published to PyPI automatically by GitHub Actions when a version tag
+is pushed. Versioning is tag-driven (via `hatch-vcs`), so the tag is the single
+source of truth for the package version:
+
+```bash
+git tag v0.1.0
+git push --tags
+```

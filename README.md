@@ -48,18 +48,22 @@ ocpf race <district> [--year <year>] [--json]
 ### Example
 
 ```bash
-$ ocpf race "Suffolk and Middlesex" --year 2026
-District:  Senate, Suffolk and Middlesex (code 166)
+$ ocpf race "1st Suffolk"
+error: "1st Suffolk" matches more than one legislative district
+  130  Senate, 1st Suffolk
+  323  House, 1st Suffolk
+$ ocpf race 130 
+District:  Senate, 1st Suffolk (code 130)
 Election:  primary 9/1/2026, general 11/3/2026
 As of:     6/30/2026 (year-to-date, cumulative)
 
-Candidate                 Party  Inc   Raised YTD    Spent YTD  Cash on Hand
-------------------------  -----  ---  -----------  -----------  ------------
-Brownsberger, William N.  -      *    $265,435.76  $135,490.74   $326,673.49
-Lander, Daniel            -           $117,740.53   $32,674.59   $136,386.28
-Wood, Brandon             -                $80.00        $3.00        $77.00
-
-* incumbent (holds this seat)
+Candidate             Party  Inc   Raised YTD    Spent YTD  Cash on Hand
+--------------------  -----  ---  -----------  -----------  ------------
+Collins, Nicholas P.  -      *    $246,711.71  $164,522.67   $100,567.72
+Gayle, Latoya         -            $49,560.05   $40,197.42    $18,760.46
+Shaw, Malik           -               $778.50      $505.37       $273.13
+D'Angelo, Marcus      -               $405.00      $157.04       $247.96
+Skeens, Juwan         -                $48.02       $90.00        $35.30
 ```
 
 Election dates and the as-of date are **timeline context**. The money is the
@@ -87,25 +91,28 @@ YTD finances, and most recent reports.
   numeric values) to stdout.
 
 ```bash
-$ ocpf filer "Brownsberger" --year 2026
-Filer:      Brownsberger, William N.  (cpfId 14454)
-Committee:  Brownsberger Committee
+$ ocpf filer "Collins" --year 2026
+Filer:      Collins, Nicholas P.  (cpfId 15084)
+Committee:  Collins Committee
 Party:      Democratic    Type: Legislative Candidates
-Office:     Senate, Suffolk and Middlesex
+Office:     Senate, 1st Suffolk
 Status:     active
-Organized:  12/13/2005
-Treasurer:  David Merfeld
+Organized:  3/9/2010
+Treasurer:  Donna Blythe-McColgan
 
 Year-to-date (as of 6/30/2026):
-  Raised YTD:    $265,435.76
-  Spent YTD:     $135,490.74
-  Cash on Hand:  $326,673.49
+  Raised YTD:    $246,711.71
+  Spent YTD:     $164,522.67
+  Cash on Hand:  $100,567.72
 
 Recent reports:
 Type            Period   Filed            Receipts  Expenditures
 --------------  -------  --------------  ---------  ------------
-Deposit Report  7/20/26  Mon, 7/20/2026    $500.00         $0.00
-...
+Deposit Report  7/16/26  Fri, 7/17/2026  $3,850.00         $0.00
+Deposit Report  7/15/26  Fri, 7/17/2026  $4,475.00         $0.00
+Deposit Report  7/15/26  Fri, 7/17/2026  $6,110.00       $241.41
+Deposit Report  7/8/26   Fri, 7/17/2026    $150.00         $5.93
+Deposit Report  7/3/26   Fri, 7/17/2026    $850.00        $33.58
 ```
 
 ## Scope
@@ -125,31 +132,6 @@ uv sync --extra dev     # runtime deps + pytest/respx
 uv run pytest           # run the test suite
 uv run ocpf race 37th   # run the CLI from source
 ```
-
-## Releasing
-
-Notable changes are recorded in [CHANGELOG.md](CHANGELOG.md).
-
-Releases are published to PyPI automatically by GitHub Actions when a version tag
-is pushed. Versioning is tag-driven (via `hatch-vcs`), so the tag is the single
-source of truth for the package version:
-
-```bash
-git tag v0.1.0
-git push --tags
-```
-
-The release workflow runs the test suite, builds the sdist and wheel, and
-publishes to PyPI using [Trusted Publishing](https://docs.pypi.org/trusted-publishers/)
-(OIDC) — no API token is stored in the repository.
-
-**First release only:** before pushing the first tag, register a *pending*
-Trusted Publisher on PyPI (Your projects → Publishing) so the initial upload can
-create the project:
-
-- PyPI project name: `ocpf`
-- Owner: `bwbensonjr`  ·  Repository: `ocpf-cli`
-- Workflow: `release.yml`  ·  Environment: `pypi`
 
 ## Design Guidelines
 
