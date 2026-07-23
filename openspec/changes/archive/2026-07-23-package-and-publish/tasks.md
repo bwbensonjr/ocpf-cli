@@ -55,6 +55,8 @@
 - [x] 6.1 Run `uv run pytest` locally; confirm all tests pass.
 - [x] 6.2 Run `uv build` locally and confirm sdist + wheel are produced with the
   new name `ocpf`, dynamic version, and included `LICENSE`.
-- [ ] 6.3 (Maintainer, external) Register the pending Trusted Publisher on PyPI.
-- [ ] 6.4 (Maintainer, external) Optionally do a TestPyPI dry run, then push
+- [x] 6.3 (Maintainer, external) Register the pending Trusted Publisher on PyPI.
+- [x] 6.4 (Maintainer, external) Optionally do a TestPyPI dry run, then push
   `v0.1.0` and confirm `uvx ocpf --help` works from the published package.
+  (Went straight to PyPI; `ocpf` 0.1.0 published and verified via
+  `uvx ocpf@0.1.0 race --year 2008 37th`.)
