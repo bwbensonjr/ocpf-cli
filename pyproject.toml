@@ -1,0 +1,29 @@
+[project]
+name = "ocpf-cli"
+version = "0.1.0"
+description = "An opinionated command-line interface to the OCPF (Massachusetts campaign finance) API"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "typer>=0.12",
+    "httpx>=0.27",
+]
+
+[project.scripts]
+ocpf = "ocpf_cli.cli:app"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "respx>=0.21",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ocpf_cli"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

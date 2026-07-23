@@ -1,8 +1,81 @@
-# OCPF Command Line Interface 
+# OCPF Command Line Interface
 
-A command line interface (CLI) interface to the OCPF API
+`ocpf` is an opinionated command-line interface to the Massachusetts
+[Office of Campaign and Political Finance](https://www.ocpf.us/) (OCPF) API
+(`https://api.ocpf.us/`). It turns a recurring, multi-step lookup — "who is
+running in this district and how much have they raised and spent?" — into a
+single command.
 
-## Design Guidelines 
+## Install
+
+The project is managed with [`uv`](https://docs.astral.sh/uv/).
+
+```bash
+# From a clone of this repository:
+uv sync                 # install runtime dependencies
+uv sync --extra dev     # ...plus pytest/respx for the test suite
+```
+
+Run the CLI without installing it globally:
+
+```bash
+uv run ocpf --help
+```
+
+## Usage
+
+```bash
+ocpf race <district> [--year <year>] [--json]
+```
+
+`ocpf race` produces a year-to-date (YTD) financial summary of the legislative
+(House or Senate) candidates in a district.
+
+- `<district>` may be a **name** matched case-insensitively against OCPF's
+  district descriptions (`&` and `and` are treated alike) or a **raw numeric
+  district code**. Ambiguous names are never guessed — the tool prints the
+  matching districts with their codes and exits so you can pick one.
+- `--year` defaults to the current calendar year.
+- `--json` emits the merged, filtered candidate records (including the
+  underlying `*Numeric` values) as JSON to stdout. Human status/progress goes
+  to stderr, so JSON output stays pipeable.
+
+### Example
+
+```bash
+$ uv run ocpf race "Suffolk and Middlesex" --year 2026
+District:  Senate, Suffolk and Middlesex (code 166)
+Election:  primary 9/1/2026, general 11/3/2026
+As of:     6/30/2026 (year-to-date, cumulative)
+
+Candidate                 Party  Inc   Raised YTD    Spent YTD  Cash on Hand
+------------------------  -----  ---  -----------  -----------  ------------
+Brownsberger, William N.  -      *    $265,435.76  $135,490.74   $326,673.49
+Lander, Daniel            -           $117,740.53   $32,674.59   $136,386.28
+Wood, Brandon             -                $80.00        $3.00        $77.00
+
+* incumbent (holds this seat)
+```
+
+Election dates and the as-of date are **timeline context**. The money is the
+single cumulative YTD figure the API provides for each candidate; it is never
+split into per-primary and per-general amounts.
+
+## Scope
+
+v1 covers **legislative** races (House and Senate). Other office types
+(statewide, county, mayoral, ballot question), drill-down into individual
+reports/donors/expenditures, and free-text candidate-name search are out of
+scope. See `openspec/` for the design and specifications.
+
+## Development
+
+```bash
+uv run pytest       # run the test suite
+uv run ocpf ...      # run the CLI from source
+```
+
+## Design Guidelines
 
 - Use OpenSpec to draft designs and create change proposals.
 - Use [clig.dev](https://clig.dev/) for command line interface guidelines.
