@@ -61,6 +61,48 @@ Election dates and the as-of date are **timeline context**. The money is the
 single cumulative YTD figure the API provides for each candidate; it is never
 split into per-primary and per-general amounts.
 
+### `ocpf filer` — one candidate's filing summary
+
+```bash
+ocpf filer <filer> [--year <year>] [--json]
+```
+
+`ocpf filer` drills into a single filer: their committee profile, cumulative
+YTD finances, and most recent reports.
+
+- `<filer>` may be a **raw numeric cpfId** (works for any filer type) or a
+  **candidate name** matched case-insensitively against the legislative field
+  for the year. cpfIds are shown by `ocpf race`. As with district names,
+  ambiguous names are never guessed — the tool prints the matching filers with
+  their cpfIds and exits. Name lookup covers legislative filers; for other
+  filer types, pass a cpfId directly.
+- `--year` defaults to the current calendar year (used for name resolution and
+  YTD context).
+- `--json` emits the `filer`, `ytdReport`, and `logReports` records (including
+  numeric values) to stdout.
+
+```bash
+$ uv run ocpf filer "Brownsberger" --year 2026
+Filer:      Brownsberger, William N.  (cpfId 14454)
+Committee:  Brownsberger Committee
+Party:      Democratic    Type: Legislative Candidates
+Office:     Senate, Suffolk and Middlesex
+Status:     active
+Organized:  12/13/2005
+Treasurer:  David Merfeld
+
+Year-to-date (as of 6/30/2026):
+  Raised YTD:    $265,435.76
+  Spent YTD:     $135,490.74
+  Cash on Hand:  $326,673.49
+
+Recent reports:
+Type            Period   Filed            Receipts  Expenditures
+--------------  -------  --------------  ---------  ------------
+Deposit Report  7/20/26  Mon, 7/20/2026    $500.00         $0.00
+...
+```
+
 ## Scope
 
 v1 covers **legislative** races (House and Senate). Other office types

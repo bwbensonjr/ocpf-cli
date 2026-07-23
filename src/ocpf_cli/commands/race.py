@@ -14,38 +14,15 @@ import typer
 
 from .. import api, render
 from ..districts import DistrictResolutionError, District, resolve_district
+from ..legislative import (
+    DEPOSITORY_PATH,
+    NON_DEPOSITORY_PATH,
+    fetch_merged_field,
+    reports_of,
+)
 
-# The two legislative feeds. The depository feed is the fuller record (bank
-# reports) and wins on conflict; the non-depository feed catches smaller filers.
-DEPOSITORY_PATH = "reports/legislative/depository/ytd/{year}"
-NON_DEPOSITORY_PATH = "reports/legislative/race/nd/{year}"
-
-
-def _reports_of(payload: Any) -> list[dict]:
-    """Normalize a feed payload to a list of report rows.
-
-    The depository feed returns `{reports: [...], summary: {...}}`; the
-    non-depository feed returns a bare list. Either way we want the rows.
-    """
-    if isinstance(payload, dict):
-        return list(payload.get("reports", []))
-    if isinstance(payload, list):
-        return list(payload)
-    return []
-
-
-def fetch_merged_field(year: int) -> list[dict]:
-    """Fetch both legislative feeds and merge by `cpfId` (depository wins)."""
-    depository = _reports_of(api.get_json(DEPOSITORY_PATH.format(year=year)))
-    non_depository = _reports_of(api.get_json(NON_DEPOSITORY_PATH.format(year=year)))
-
-    merged: dict[Any, dict] = {}
-    # Seed with non-depository first so depository rows overwrite on conflict.
-    for row in non_depository:
-        merged[row.get("cpfId")] = row
-    for row in depository:
-        merged[row.get("cpfId")] = row
-    return list(merged.values())
+# Backwards-compatible alias: the merge helpers now live in `legislative`.
+_reports_of = reports_of
 
 
 def filter_by_district(rows: list[dict], code: int) -> list[dict]:

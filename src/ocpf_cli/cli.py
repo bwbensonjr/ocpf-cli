@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import typer
 
+from .commands.filer import filer
 from .commands.race import race
 
 app = typer.Typer(
@@ -27,6 +28,7 @@ def main(ctx: typer.Context) -> None:
 
 
 app.command("race")(race)
+app.command("filer")(filer)
 
 
 if __name__ == "__main__":

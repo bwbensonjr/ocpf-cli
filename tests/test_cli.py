@@ -29,6 +29,19 @@ def test_race_is_a_named_subcommand():
     assert "--json" in result.output
 
 
+def test_both_commands_listed_in_help():
+    result = runner.invoke(app, ["--help"])
+    assert result.exit_code == 0
+    assert "race" in result.output
+    assert "filer" in result.output
+
+
+def test_filer_is_a_named_subcommand():
+    result = runner.invoke(app, ["filer", "--help"])
+    assert result.exit_code == 0
+    assert "--json" in result.output
+
+
 def test_unknown_command_errors_nonzero():
     result = runner.invoke(app, ["bogus"])
     assert result.exit_code != 0
