@@ -2,44 +2,58 @@
 
 from __future__ import annotations
 
+import re
+
 from typer.testing import CliRunner
 
 from ocpf_cli.cli import app
 
 runner = CliRunner()
 
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _plain(text: str) -> str:
+    """Strip ANSI color codes so substring checks are color-independent.
+
+    Rich colorizes Typer's help when a terminal (or CI's FORCE_COLOR) enables
+    color, inserting escape codes that split option tokens like `--json`. The
+    tests care that the option is listed, not whether it is styled.
+    """
+    return _ANSI.sub("", text)
+
 
 def test_no_args_shows_help_and_exits_zero():
     result = runner.invoke(app, [])
     assert result.exit_code == 0
-    assert "Usage" in result.output
-    assert "race" in result.output
+    assert "Usage" in _plain(result.output)
+    assert "race" in _plain(result.output)
 
 
 def test_help_flag():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "race" in result.output
+    assert "race" in _plain(result.output)
 
 
 def test_race_is_a_named_subcommand():
     result = runner.invoke(app, ["race", "--help"])
     assert result.exit_code == 0
-    assert "district" in result.output.lower()
-    assert "--json" in result.output
+    assert "district" in _plain(result.output).lower()
+    assert "--json" in _plain(result.output)
 
 
 def test_both_commands_listed_in_help():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "race" in result.output
-    assert "filer" in result.output
+    assert "race" in _plain(result.output)
+    assert "filer" in _plain(result.output)
 
 
 def test_filer_is_a_named_subcommand():
     result = runner.invoke(app, ["filer", "--help"])
     assert result.exit_code == 0
-    assert "--json" in result.output
+    assert "--json" in _plain(result.output)
 
 
 def test_unknown_command_errors_nonzero():
