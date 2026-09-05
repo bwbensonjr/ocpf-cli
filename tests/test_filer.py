@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ocpf_cli import api
+from ocpf_cli import api, resolve
 from ocpf_cli.commands import filer
 
 
@@ -21,22 +21,22 @@ def test_numeric_argument_used_as_cpfid_without_fetch(monkeypatch):
     def boom(_year):
         raise AssertionError("should not fetch the field for a numeric cpfId")
 
-    monkeypatch.setattr(filer, "fetch_merged_field", boom)
+    monkeypatch.setattr(resolve, "fetch_merged_field", boom)
     assert filer.resolve_filer("14454", 2026) == 14454
 
 
 def test_unique_name_match(monkeypatch):
-    monkeypatch.setattr(filer, "fetch_merged_field", lambda year: FIELD)
+    monkeypatch.setattr(resolve, "fetch_merged_field", lambda year: FIELD)
     assert filer.resolve_filer("brownsberger", 2026) == 14454
 
 
 def test_name_match_is_case_insensitive(monkeypatch):
-    monkeypatch.setattr(filer, "fetch_merged_field", lambda year: FIELD)
+    monkeypatch.setattr(resolve, "fetch_merged_field", lambda year: FIELD)
     assert filer.resolve_filer("LANDER", 2026) == 19588
 
 
 def test_ambiguous_name_lists_matches(monkeypatch):
-    monkeypatch.setattr(filer, "fetch_merged_field", lambda year: FIELD)
+    monkeypatch.setattr(resolve, "fetch_merged_field", lambda year: FIELD)
     with pytest.raises(filer.FilerResolutionError) as exc:
         filer.resolve_filer("smith", 2026)
     ids = {m.cpf_id for m in exc.value.matches}
@@ -44,7 +44,7 @@ def test_ambiguous_name_lists_matches(monkeypatch):
 
 
 def test_no_match_errors_with_cpfid_hint(monkeypatch):
-    monkeypatch.setattr(filer, "fetch_merged_field", lambda year: FIELD)
+    monkeypatch.setattr(resolve, "fetch_merged_field", lambda year: FIELD)
     with pytest.raises(filer.FilerResolutionError) as exc:
         filer.resolve_filer("Nonexistent Person", 2026)
     assert exc.value.matches == []
