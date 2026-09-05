@@ -115,11 +115,72 @@ Deposit Report  7/8/26   Fri, 7/17/2026    $150.00         $5.93
 Deposit Report  7/3/26   Fri, 7/17/2026    $850.00        $33.58
 ```
 
+### `ocpf expenditures` — who a committee paid
+
+```bash
+ocpf expenditures <filer> [--year <year>] [--since <date>] [--until <date>]
+                          [--vendor <text>] [--min-amount <n>] [--max-amount <n>]
+                          [--by-vendor] [--limit <n>] [--json]
+```
+
+`ocpf expenditures` lists the payments a single committee has made, drawn from
+every expenditure record OCPF holds for that filer.
+
+- `<filer>` resolves exactly as it does for `ocpf filer`: a numeric cpfId, or a
+  legislative candidate name.
+- Filters combine: `--year`, `--since`/`--until` (`YYYY-MM-DD` or `M/D/YYYY`),
+  `--vendor` (case-insensitive substring), `--min-amount`/`--max-amount`.
+- `--by-vendor` totals by payee instead of listing records.
+- `--limit` caps displayed rows; the reported total always describes the full
+  filtered set, not just what fit on screen.
+
+```bash
+$ ocpf expenditures Uyterhoeven --year 2026 --by-vendor --limit 6
+Vendor                                    Total  Count  Src
+-----------------------------------  ----------  -----  ----
+EAST COAST PRI                       $66,034.34     11  bank
+OUTGOING WIRE TRANSFER               $23,000.00      2  bank
+Jovana Calvillo (4 filed spellings)  $20,250.00      4  bank
+AMALGAMATED BANK                     $17,000.00      2  bank
+MAGDA MOHAMED (2 filed spellings)    $16,250.00      6  bank
+EAST COAST PR                         $7,463.34      1  bank
+
+Showing 6 of 78 vendors (--limit 6).
+Total: $210,413.30  (181 records, 78 vendors)
+```
+
+**A filter that matches nothing is an answer, not an error** — it exits zero, so
+you can tell "they paid them nothing" apart from "the lookup failed":
+
+```bash
+$ ocpf expenditures Uyterhoeven --vendor "Connection Strategies"
+No expenditures matching vendor "Connection Strategies"
+(searched 1,019 records, 1/2020-8/2026)
+$ echo $?
+0
+```
+
+Three things to know about the underlying data:
+
+- **`bank` marks bank-reported records.** Their payee comes off a bank statement
+  and can be an opaque description (`OUTGOING WIRE TRANSFER`) rather than the
+  true recipient. An absence of matches proves no *disclosed* payment; it cannot
+  rule out one routed through an undisclosed wire.
+- **Payees are shown as OCPF clarified them.** Where OCPF supplied a
+  `clarifiedName`, that is the payee used and grouped on, with the filed string
+  shown alongside (`Middle Seat (OUTGOING WIRE TRANSFER)`); a rollup row notes
+  how many filed spellings it covers. Variants OCPF has *not* clarified are
+  never merged.
+- **The total will not match `ocpf filer`'s YTD spent figure**, and that is
+  correct: item search includes out-of-pocket candidate expenditures that the
+  YTD bank figure excludes.
+
 ## Scope
 
 v1 covers **legislative** races (House and Senate). Other office types
-(statewide, county, mayoral, ballot question), drill-down into individual
-reports/donors/expenditures, and free-text candidate-name search are out of
+(statewide, county, mayoral, ballot question) are reachable by cpfId but not by
+name. Contribution and subvendor search, cross-filer vendor search ("every
+committee that paid this firm"), and free-text candidate-name search are out of
 scope. See `openspec/` for the design and specifications.
 
 ## Development

@@ -6,6 +6,7 @@ from importlib.metadata import PackageNotFoundError, version
 
 import typer
 
+from .commands.expenditures import expenditures
 from .commands.filer import filer
 from .commands.race import race
 
@@ -60,6 +61,7 @@ def main(
 
 app.command("race")(race)
 app.command("filer")(filer)
+app.command("expenditures")(expenditures)
 
 
 if __name__ == "__main__":
