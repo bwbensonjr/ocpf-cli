@@ -61,10 +61,14 @@ endpoint returns the individual records inside filed reports, and it fails open
 in three ways that produce plausible-looking wrong answers rather than errors:
 
 - `SearchTypeCategory` picks the record kind: **`B` expenditures, `R` receipts,
-  `S` subvendor payments, `D` donations** (empty in practice). Any
-  *unrecognized* value silently returns **receipts** — `E`, `expenditures`,
-  `EXP` and `""` all fall back that way, with no error. Never build this
-  parameter from user input.
+  `S` subvendor payments, `D` donations**. Any *unrecognized* value silently
+  returns **receipts** — `E`, `expenditures`, `EXP` and `""` all fall back that
+  way, with no error. Never build this parameter from user input.
+- `search/recordTypes/{searchTypeCategory}` takes the **same single-letter
+  code**, not a word. `search/recordTypes/B` lists the 14 expenditure record
+  types (301 General Expenditure, 332 Out-of-pocket candidate expense, ...);
+  `R`/`S`/`D` return `[]`. Out-of-pocket types are why an item-search
+  expenditure total legitimately exceeds the depository YTD figure.
 - **`StartIndex` is 1-based**, not 0-based: `StartIndex=0` and `StartIndex=1`
   both return the first record. Paging from a 0-based offset duplicates the
   record on every page boundary and inflates any total computed from the result.
