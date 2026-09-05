@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `ocpf expenditures <filer>` lists and totals the payments a committee has
+  made, with `--year`, `--since`/`--until`, `--vendor`, `--min-amount`/
+  `--max-amount`, `--limit` and `--json`. `--by-vendor` totals by payee instead
+  of listing records.
+
+### Changed
+
+- **A filter that matches nothing now exits zero** rather than non-zero. When a
+  command retrieves a result set successfully and a user-supplied filter narrows
+  it to nothing, that is reported on stdout as a finding and the command
+  succeeds — so `ocpf expenditures <filer> --vendor "..."` distinguishes "this
+  committee paid them nothing" from "the lookup failed". Input that resolves to
+  nothing (an unknown district, a name matching no filer), bad input and API
+  errors still exit non-zero. Scripts that treated any empty result as a failure
+  need updating.
+
 ## [0.2.0] - 2026-07-23
 
 ### Added
