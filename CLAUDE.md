@@ -60,6 +60,17 @@ drove this design:
   depository feed by `cpfId`, depository winning on conflict.
 - `districtCodeHeld == -1` marks a non-incumbent; an incumbent's
   `districtCodeHeld` equals the district code.
+- **The present map has no year, so over-matching in it proves nothing.** A name
+  that matches several current districts may name exactly one district in the
+  year asked about: `Plymouth and Norfolk` prefixes `1st ...` (167) and
+  `2nd ...` (169) today, while the 2016 and 2020 maps each hold one district of
+  that name, code 127. Ambiguity is therefore decided against the **requested
+  year's** map, and an ambiguous tier-1 result falls through exactly as an absent
+  one does. This needs no redistricting cutoff: in a current year the year's map
+  *is* the current field and collides identically (2024 gives that name 0 exact
+  and 2 substring matches). Exact matches beat substring matches within a tier,
+  but **two exact matches are still ambiguous** — `1st Suffolk` names House 323
+  and Senate 130, so "let an exact match win" would silently pick one.
 - `districts` returns 365 rows of `{office, code, description, ...}`. Filter to
   `office in {"House", "Senate"}` for legislative resolution (200 rows: 160
   House, 40 Senate). It is **strictly the present map** and omits retired codes
@@ -72,6 +83,17 @@ drove this design:
     code 140 for 2020, and no office string maps to two codes. Feed coverage
     starts abruptly at 2020 (428 rows; 2019 has 13, 2018 has 2, 2017 has 0), so
     this only answers for 2020 and later.
+
+    It is therefore a source of era-correct district **codes**, not just names,
+    and is the only one for 2020+ — `finsummaries` returns nothing from 2020 on.
+    Both directions of resolution read it: a name is matched against it, and a
+    numeric code is validated against it, so that **a district code the tool
+    prints for a year is a code it accepts for that year**. Validating codes
+    against the present map alone accepted them for exactly the years
+    `finsummaries` covered and rejected them afterwards, which is inverted from
+    where a retired seat needs help. For 2020 the feed holds 127
+    (`Plymouth & Norfolk`) and 140 (`Worcester & Norfolk`) and holds neither 167
+    nor 169, the pair the 2021 map split 127 into.
   - `filer/{cpfId}` returns `officeSought` as an object carrying
     `districtCode` **and** `districtDescription`. It reports the filer's **MOST
     RECENT** office sought, not the one they sought in any given year, so it

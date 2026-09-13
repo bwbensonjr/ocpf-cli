@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A retired district whose name prefixes current ones is reachable again.**
+  `Plymouth and Norfolk` was a Senate seat through the 2011 cycle; the 2021 map
+  split it into `1st Plymouth and Norfolk` and `2nd Plymouth and Norfolk`. Asking
+  for it by name was refused as ambiguous — against the *present* map, though the
+  query named a year — and both districts offered as alternatives had not existed
+  in that year, so every suggestion was a dead end. Ambiguity is now decided
+  against the requested year's map, which holds exactly one district of that name
+  (code 127) for every year from 2010 through 2020. A name that is genuinely
+  ambiguous in the year asked about still errors, and the districts it offers are
+  now ones that existed then.
+- **A district code the tool prints is a district code it accepts.**
+  `ocpf race "Worcester and Norfolk" --year 2020` reported code 140 and
+  `ocpf race 140 --year 2020` then refused it, because codes were validated
+  against the present map and `onballot/finsummaries`, which covers no year from
+  2020 on. Codes are now validated against the requested year's map, reading the
+  same sources in the same order as the name path. This also reopens the only way
+  to disambiguate a name by hand.
+
 - **Districts whose names contain commas are no longer dropped.** Every
   multi-county district — `Worcester, Hampden, Hampshire & Franklin`,
   `Middlesex, Suffolk & Essex`, `Berkshire, Hampshire & Franklin` — failed to
