@@ -15,6 +15,7 @@ from ocpf_cli.districts import (
 # Captured before the autouse fixture can stub it, for the one test that
 # exercises this function directly.
 REAL_DISTRICT_FOR_CODE = districts._district_for_code
+REAL_RESOLVE_FROM_LOG = districts.resolve_from_log
 
 
 @pytest.fixture(autouse=True)
@@ -26,6 +27,7 @@ def offline(monkeypatch):
     them overrides these stubs explicitly.
     """
     monkeypatch.setattr(districts, "fetch_year_districts", lambda year: [])
+    monkeypatch.setattr(districts, "resolve_from_log", lambda year, target, query: None)
     # Stub the leaf that makes requests, not the sweep itself, so tests that
     # mean to exercise the sweep still run the real traversal.
     monkeypatch.setattr(districts, "_district_for_code", lambda year, code: None)
@@ -319,3 +321,219 @@ def test_error_mentions_the_current_map_when_the_name_is_current(monkeypatch):
     with pytest.raises(DistrictResolutionError) as exc:
         resolve_district("Suffolk and Middlesex", 2010, [])
     assert "matches no legislative" in str(exc.value)
+
+
+# --- Optional district code ---------------------------------------------------
+
+
+def test_full_label_includes_the_code_when_known():
+    d = districts.District(code=130, office="Senate", description="1st Suffolk")
+    assert d.label == "Senate, 1st Suffolk"
+    assert d.full_label == "Senate, 1st Suffolk (code 130)"
+
+
+def test_full_label_drops_the_code_when_absent():
+    # A district known by name but not by code reads as an omission, never as
+    # the string "code None".
+    d = districts.District(code=None, office="Senate", description="1st Hampden & Hampshire")
+    assert d.label == "Senate, 1st Hampden & Hampshire"
+    assert d.full_label == "Senate, 1st Hampden & Hampshire"
+    assert "None" not in d.full_label
+
+
+# --- Report-log resolution tier -----------------------------------------------
+
+
+def _sweep_row(cpf_id, office, period_end_year, name="Filer, A"):
+    from ocpf_cli.reports import ReportingPeriod, SpecialReportRow
+    from datetime import date
+
+    return SpecialReportRow(
+        cpf_id=cpf_id,
+        name=name,
+        office_sought=office,
+        period=ReportingPeriod(
+            start=date(period_end_year, 9, 21), end=date(period_end_year, 10, 18)
+        ),
+        report_id=cpf_id * 10,
+    )
+
+
+def _install_log(monkeypatch, rows, filers=None):
+    """Serve a fake sweep and fake `filer/{cpfId}` lookups."""
+    from ocpf_cli import reports
+
+    monkeypatch.setattr(districts, "resolve_from_log", REAL_RESOLVE_FROM_LOG)
+    monkeypatch.setattr(
+        reports,
+        "fetch_special_reports",
+        lambda stage: tuple(rows) if stage is reports.SpecialStage.GENERAL else (),
+    )
+
+    def fake_get_json(path, params=None, **kwargs):
+        if path.startswith("filer/"):
+            return (filers or {}).get(int(path.split("/")[1]), {})
+        raise AssertionError(f"unexpected path {path}")
+
+    monkeypatch.setattr(districts.api, "get_json", fake_get_json)
+
+
+def _filer(office, description, code):
+    return {
+        "officeSought": {
+            "officeDescription": office,
+            "districtDescription": description,
+            "districtCode": code,
+        }
+    }
+
+
+def test_log_tier_excludes_non_legislative_offices(monkeypatch):
+    rows = [
+        _sweep_row(1, "Senate 2nd Hampden & Hampshire", 2013),
+        _sweep_row(2, "Municipal, Worcester", 2013),
+        _sweep_row(3, "Governor's Council 8th District", 2013),
+        _sweep_row(4, "Mayoral Revere", 2013),
+    ]
+    _install_log(monkeypatch, rows)
+
+    seats = districts.fetch_log_seats(2013)
+
+    assert list(seats) == [("Senate", "2nd Hampden & Hampshire")]
+
+
+def test_log_tier_narrows_to_the_requested_year(monkeypatch):
+    rows = [
+        _sweep_row(1, "Senate 2nd Hampden & Hampshire", 2013),
+        _sweep_row(2, "Senate 1st Suffolk & Middlesex", 2007),
+    ]
+    _install_log(monkeypatch, rows)
+
+    assert list(districts.fetch_log_seats(2013)) == [("Senate", "2nd Hampden & Hampshire")]
+    assert list(districts.fetch_log_seats(2007)) == [("Senate", "1st Suffolk & Middlesex")]
+
+
+@pytest.mark.parametrize(
+    "query",
+    ["2nd Hampden and Hampshire", "2nd Hampden & Hampshire", "Second Hampden and Hampshire"],
+)
+def test_log_tier_matches_notation_variants(monkeypatch, query):
+    _install_log(
+        monkeypatch,
+        [_sweep_row(1, "Senate 2nd Hampden & Hampshire", 2013)],
+        {1: _filer("Senate", "2nd Hampden & Hampshire", 114)},
+    )
+
+    found = resolve_district(query, 2013, districts=[])
+
+    assert (found.office, found.description, found.code) == (
+        "Senate", "2nd Hampden & Hampshire", 114,
+    )
+
+
+def test_log_tier_does_not_substring_match(monkeypatch):
+    # The tier sees only the seats that held a special that year, so a substring
+    # fallback would resolve "1st Suffolk" to "21st Suffolk" with no signal.
+    _install_log(monkeypatch, [_sweep_row(1, "House 21st Suffolk", 2013)])
+
+    with pytest.raises(DistrictResolutionError):
+        resolve_district("1st Suffolk", 2013, districts=[])
+
+
+def test_log_tier_reports_ambiguity_with_codes(monkeypatch):
+    _install_log(
+        monkeypatch,
+        [
+            _sweep_row(1, "Senate Hampden & Hampshire", 2013),
+            _sweep_row(2, "House Hampden & Hampshire", 2013),
+        ],
+        {
+            1: _filer("Senate", "Hampden & Hampshire", 114),
+            2: _filer("House", "Hampden & Hampshire", 240),
+        },
+    )
+
+    with pytest.raises(DistrictResolutionError) as exc:
+        resolve_district("Hampden and Hampshire", 2013, districts=[])
+
+    assert len(exc.value.candidates) == 2
+    # Codes are recovered for the matched seats so the listing can name them.
+    assert {c.code for c in exc.value.candidates} == {114, 240}
+
+
+def test_code_recovery_ignores_filers_who_sought_a_different_seat(monkeypatch):
+    # Brady and Diehl filed for 2nd Plymouth & Bristol in 2015 and both now
+    # report 2nd Plymouth and Norfolk (169). Taking the modal code without the
+    # description check would return 169 for a race in district 128.
+    _install_log(
+        monkeypatch,
+        [
+            _sweep_row(14822, "Senate 2nd Plymouth & Bristol", 2015, "Brady, Michael D."),
+            _sweep_row(14907, "Senate 2nd Plymouth & Bristol", 2015, "Diehl, Geoff"),
+            _sweep_row(16236, "Senate 2nd Plymouth & Bristol", 2015, "Raduc, Anna G."),
+            _sweep_row(16238, "Senate 2nd Plymouth & Bristol", 2015, "Lynch, Joseph E."),
+        ],
+        {
+            14822: _filer("Senate", "2nd Plymouth and Norfolk", 169),
+            14907: _filer("Senate", "2nd Plymouth and Norfolk", 169),
+            16236: _filer("Senate", "2nd Plymouth & Bristol", 128),
+            16238: _filer("Senate", "2nd Plymouth & Bristol", 128),
+        },
+    )
+
+    found = resolve_district("2nd Plymouth and Bristol", 2015, districts=[])
+
+    assert found.code == 128
+
+
+def test_code_recovery_ignores_a_filer_in_another_office(monkeypatch):
+    _install_log(
+        monkeypatch,
+        [_sweep_row(1, "Senate 5th Hampden", 2013)],
+        # Same district description, different office.
+        {1: _filer("House", "5th Hampden", 246)},
+    )
+
+    found = resolve_district("5th Hampden", 2013, districts=[])
+
+    assert found.code is None
+
+
+def test_district_resolves_without_a_code_when_no_filer_names_the_seat(monkeypatch):
+    # Senate 1st Hampden & Hampshire 2013: its one sweep filer, Franco, has
+    # since sought a Governor's Council seat.
+    _install_log(
+        monkeypatch,
+        [_sweep_row(14025, "Senate 1st Hampden & Hampshire", 2013, "Franco, Michael")],
+        {14025: _filer("Governor's Council", "8th District", 1108)},
+    )
+
+    found = resolve_district("1st Hampden and Hampshire", 2013, districts=[])
+
+    assert found.code is None
+    assert found.full_label == "Senate, 1st Hampden & Hampshire"
+
+
+def test_code_recovery_survives_a_filer_lookup_failure(monkeypatch):
+    from ocpf_cli import api as api_module
+
+    _install_log(
+        monkeypatch,
+        [
+            _sweep_row(1, "Senate 2nd Hampden & Hampshire", 2013),
+            _sweep_row(2, "Senate 2nd Hampden & Hampshire", 2013),
+        ],
+        {2: _filer("Senate", "2nd Hampden & Hampshire", 114)},
+    )
+    real = districts.api.get_json
+
+    def flaky(path, params=None, **kwargs):
+        if path == "filer/1":
+            raise api_module.OcpfApiError("boom", path=path, status_code=500)
+        return real(path, params, **kwargs)
+
+    monkeypatch.setattr(districts.api, "get_json", flaky)
+
+    found = resolve_district("2nd Hampden and Hampshire", 2013, districts=[])
+
+    assert found.code == 114

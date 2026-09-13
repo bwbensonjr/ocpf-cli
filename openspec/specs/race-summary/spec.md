@@ -66,7 +66,7 @@ filings.
 ### Requirement: District resolution
 
 The system SHALL resolve the `<district>` argument to the single OCPF district
-code that district had **in the requested year**. It SHALL accept either a raw
+the name identified **in the requested year**. It SHALL accept either a raw
 numeric district code or a name matched case-insensitively against district
 descriptions, and it SHALL restrict matches to legislative offices (House and
 Senate).
@@ -78,9 +78,21 @@ significant.
 
 A district that existed in the requested year SHALL be resolvable by name even
 if it has since been retired at redistricting and no longer appears in the
-current district reference. When a name cannot be placed in the requested year,
-the system SHALL say so in terms of that year rather than asserting the name is
-not a legislative district.
+current district reference. This SHALL hold for years in which no source of
+district *codes* covers the requested year: where the districts that held a
+special election that year are known by name from the candidates' filings, those
+names SHALL be resolvable.
+
+A resolved district SHALL carry its district code whenever the code can be
+established from a source that ties it to the requested year. Where a name is
+known for the year but no such source reports a code, the district SHALL still
+resolve, with its code absent. The system SHALL NOT substitute a code drawn from
+a different year, and SHALL NOT report a district as non-existent on the grounds
+that only its code is unknown.
+
+When a name cannot be placed in the requested year at all, the system SHALL say
+so in terms of that year rather than asserting the name is not a legislative
+district.
 
 #### Scenario: Numeric code passed directly
 
@@ -111,6 +123,27 @@ not a legislative district.
   has since been retired at redistricting, such as `"Worcester and Norfolk"` for
   2020
 - **THEN** the system resolves it to the code it held in that year and proceeds
+
+#### Scenario: Retired district named for a year with no district-code source
+
+- **WHEN** the user requests a district by the name it held in a year for which
+  no district-code source has data, but in which it held a special election,
+  such as `"2nd Hampden and Hampshire"` for 2013
+- **THEN** the system resolves it rather than reporting that it was not a
+  legislative district that year
+
+#### Scenario: Code recovered from the candidates who sought the seat
+
+- **WHEN** a district is resolved by name for such a year and at least one
+  candidate who filed for that seat still reports it as the office they sought
+- **THEN** the resolved district carries the code those candidates report
+
+#### Scenario: Code unavailable for a district known by name
+
+- **WHEN** a district is resolved by name for such a year but no candidate who
+  filed for that seat still reports it as the office they sought
+- **THEN** the district resolves with its code absent, and the system does not
+  substitute a code the data does not tie to that year
 
 #### Scenario: Retired district named for a year after its retirement
 
@@ -165,6 +198,11 @@ exactly once.
 The system SHALL include a candidate in the output when the candidate's
 `districtCodeSought` or `districtCodeHeld` equals the resolved district code.
 
+Where the resolved district has no code, no candidate SHALL be matched by code.
+A district known only by name carries no code to compare against, and treating
+an absent code as matching a row whose own code is missing or zero would include
+unrelated candidates.
+
 #### Scenario: Candidate seeking the district
 
 - **WHEN** a candidate's `districtCodeSought` equals the resolved code
@@ -174,6 +212,13 @@ The system SHALL include a candidate in the output when the candidate's
 
 - **WHEN** an incumbent's `districtCodeHeld` equals the resolved code
 - **THEN** the candidate is included and marked as the incumbent
+
+#### Scenario: Resolved district has no code
+
+- **WHEN** the resolved district carries no code and candidate rows are filtered
+  by code
+- **THEN** no candidate is matched by code, rather than every candidate whose own
+  code is absent or zero
 
 #### Scenario: No candidates found
 
@@ -419,6 +464,10 @@ minimum, candidate name and the receipts and expenditures their operative filing
 reports, with monetary values as formatted currency. The table SHALL be labeled
 so that the figures are not mistaken for year-to-date amounts.
 
+Where the district carries no code, the rendered header SHALL name the district
+without asserting a code, and the JSON district code SHALL be null rather than a
+placeholder value.
+
 #### Scenario: Table columns
 
 - **WHEN** a special-election summary renders in default output
@@ -437,3 +486,10 @@ so that the figures are not mistaken for year-to-date amounts.
 - **THEN** the system emits the roster as JSON including each candidate's cpfId,
   the underlying numeric monetary values, the reporting period covered, and the
   identifier of the operative report each figure came from
+
+#### Scenario: District without a code renders and serializes
+
+- **WHEN** a special-election summary renders for a district resolved without a
+  code
+- **THEN** the header names the district and omits the code, and `--json` carries
+  a null district code

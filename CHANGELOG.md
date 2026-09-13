@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Districts renamed since a pre-2020 odd year now resolve for that year.**
+  Year-aware resolution had no source with data for 2007, 2013, 2015, 2017 or
+  2019 — `onballot/finsummaries` returns nothing for those years and the
+  legislative feed starts at 2020 — so a district renamed since could not be
+  named for the year it held a special, which is what those years are for:
+  `ocpf race "2nd Hampden and Hampshire" --year 2013 --special` failed as though
+  the name were invalid, after paying a ~20-second code-range sweep to find out.
+  Resolution now consults the special-election report log, which names the seats
+  from the filings themselves, and recovers each seat's district code by tallying
+  the filers who sought it. This fixes all four affected districts and skips the
+  code-range sweep for them.
+
 - **District names now resolve against the map for the requested year.** A
   district retired at redistricting could not be named even for a year in which
   it existed: `ocpf race "Worcester and Norfolk" --year 2020` failed as though
@@ -20,6 +32,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in terms of the year, naming where the district did exist.
 - Ordinal words are folded to the digit forms the API writes, so
   `"First Plymouth & Norfolk"` resolves like `"1st Plymouth and Norfolk"`.
+
+### Changed
+
+- **BREAKING (`--json` consumers): `districtCode` may now be `null`.** A district
+  can be known by name and not by number. `filer/{cpfId}` reports a filer's most
+  recent office, so a seat whose candidates have all since run for something else
+  yields no code — Senate 1st Hampden & Hampshire 2013 is the live case. That
+  district now resolves and reports with its code omitted from the header and
+  `null` in JSON, rather than being reported as a district that never existed.
 
 ### Added
 

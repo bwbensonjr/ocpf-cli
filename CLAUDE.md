@@ -66,21 +66,48 @@ drove this design:
   entirely — code 140, Senate Worcester & Norfolk through the 2011 cycle,
   appears under no office. There is no year-scoped list: `districts/{year}`
   returns `[]` and `onballot/districts/{year}` is a 404.
-- Era-correct district names come from two places instead:
+- Era-correct district names come from three places instead:
   - The legislative YTD feed pairs an `officeSought` string with a usable
     `districtCodeSought` on every row — `"Senate, Worcester & Norfolk"` with
     code 140 for 2020, and no office string maps to two codes. Feed coverage
     starts abruptly at 2020 (428 rows; 2019 has 13, 2018 has 2, 2017 has 0), so
     this only answers for 2020 and later.
   - `filer/{cpfId}` returns `officeSought` as an object carrying
-    `districtCode` **and** `districtDescription`, and retains them for a filer
-    whose district no longer exists — cpfId 10315 still reports code 140 /
-    `Worcester & Norfolk` a decade after that seat was retired. This is the only
-    handle on a pre-2020 retired district, reached by sweeping
-    `onballot/finsummaries/{year}/{code}` for populated codes (those rows carry
-    `districtCode: 0` and no district name, so the code is known only from the
-    URL and the name only from the filers). This tier only answers for a year
-    `finsummaries` actually covers; see the coverage gap above.
+    `districtCode` **and** `districtDescription`. It reports the filer's **MOST
+    RECENT** office sought, not the one they sought in any given year, so it
+    surfaces a retired district only for a filer who has sought nothing since —
+    cpfId 10315 still reports code 140 / `Worcester & Norfolk` a decade later
+    because 10315 stopped running. Do not read it as an era-correct record.
+    Across the 2013 Senate 2nd Hampden & Hampshire roster only one filer in four
+    still names that seat: Humason (13888) reports Mayoral / Westfield, Bartley
+    (12646) House / 5th Hampden, Franco (14025) Governor's Council, and only
+    Tautznik (15697) Senate / 2nd Hampden & Hampshire (code 114).
+    So a district code is recovered by **tallying a seat's filers and discarding
+    every filer whose reported district no longer matches the seat**, never from
+    one lookup and never from an unfiltered mode: Brady (14822) and Diehl (14907)
+    both filed for Senate 2nd Plymouth & Bristol in 2015 and both now report *2nd
+    Plymouth and Norfolk* (169), which an unfiltered tally would return for a
+    race in district 128.
+    It is reached two ways: by sweeping `onballot/finsummaries/{year}/{code}` for
+    populated codes (those rows carry `districtCode: 0` and no district name, so
+    the code is known only from the URL and the name only from the filers), which
+    answers only for a year `finsummaries` covers; and from the report-log tier
+    below, which is seeded by name instead of by code.
+  - **The special-election report log** names the seats that held a special in a
+    year, from the filings themselves. This is the only source for the pre-2020
+    **odd** years, where `finsummaries` has nothing and the legislative feed has
+    not started — the years `ocpf race --special` is about. It is seeded from the
+    memoized sweep in `reports.py`, so it answers only for seats that held a
+    special and costs nothing extra once `--special` has run. Log rows carry no
+    district code, so the code is recovered by the filer tally above, for the
+    matched seat only — recovering it for every seat in a year costs a request
+    per candidate across every special that year (~40 for 2013) to answer about
+    one district. A seat whose filers have all moved on resolves with **no code**:
+    `District.code` is `int | None`, and `District.full_label` drops the
+    `(code N)` rather than printing `code None`. Senate 1st Hampden & Hampshire
+    2013 is the live example. Name matching here is **exact only** — this tier
+    sees one year's seats, so a substring fallback could resolve `1st Suffolk` to
+    `21st Suffolk` with nothing to signal the swap.
 - `filingSchedules/{year}` provides `primaryElectionDate` and
   `generalElectionDate` (timeline context only — money is never split by
   election).

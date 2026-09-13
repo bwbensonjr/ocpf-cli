@@ -45,8 +45,16 @@ from ..legislative import (
 _reports_of = reports_of
 
 
-def filter_by_district(rows: list[dict], code: int) -> list[dict]:
-    """Keep rows sought-for or held-in the given district code."""
+def filter_by_district(rows: list[dict], code: int | None) -> list[dict]:
+    """Keep rows sought-for or held-in the given district code.
+
+    A district resolved without a code matches nothing. The guard is not
+    defensive padding: `row.get(...)` returns None for a row whose own code is
+    absent, so a plain `== code` comparison against a None code would match
+    every such row and report unrelated candidates as this district's field.
+    """
+    if code is None:
+        return []
     return [
         row
         for row in rows
@@ -121,6 +129,8 @@ def _is_incumbent(row: dict, code: int) -> bool:
     # held-code comparison.
     if "isIncumbent" in row:
         return bool(row["isIncumbent"])
+    if code is None:
+        return False
     return row.get("districtCodeHeld") == code
 
 
@@ -141,7 +151,7 @@ def _render_table(
     (finsummaries) data renders as final full-cycle totals: no as-of line,
     final-total column labels, and a winner marker.
     """
-    print(f"District:  {district.label} (code {district.code})")
+    print(f"District:  {district.full_label}")
     dates = []
     if timeline.primary_election_date:
         dates.append(f"primary {timeline.primary_election_date}")
@@ -316,8 +326,7 @@ def _select_stage(
 
     if not held:
         raise SpecialRaceError(
-            f"No special election found for {district.label} (code "
-            f"{district.code}) in {year}"
+            f"No special election found for {district.full_label} in {year}"
         )
 
     if requested is not None:
@@ -387,7 +396,7 @@ def _render_special_table(
     date derived from the filing window would be a guess shown as a fact.
     """
     windows = {p for p in (_candidate_period(c) for c in roster) if p is not None}
-    print(f"District:  {district.label} (code {district.code})")
+    print(f"District:  {district.full_label}")
     print(f"Election:  special {stage.value}")
     if len(windows) > 1:
         print(f"Period:    {period.label} (candidates' filing windows differ)")
@@ -513,7 +522,7 @@ def race(
     except DistrictResolutionError as exc:
         render.error(str(exc))
         for cand in exc.candidates:
-            render.status(f"  {cand.code}  {cand.label}")
+            render.status(f"  {cand.full_label}")
         raise typer.Exit(code=1)
     except api.OcpfApiError as exc:
         render.error(str(exc))
@@ -543,7 +552,9 @@ def race(
         # The current-cycle feeds only carry money from ~2020 on. For earlier
         # cycles they resolve names but leave the money blank, so fall back to
         # the district-scoped historical summaries (final full-cycle totals).
-        if not has_money(matched):
+        if not has_money(matched) and resolved.code is not None:
+            # `onballot/finsummaries` is addressed by code; a district known only
+            # by name has nothing to ask it for.
             hist_rows = normalize_finsummaries(
                 fetch_finsummaries(year, resolved.code)
             )
@@ -552,9 +563,8 @@ def race(
                 historical = True
         if not matched:
             render.error(
-                f"No candidates found for {resolved.label} (code "
-                f"{resolved.code}) in {year}; if a special election was held "
-                f"that year, reach it with --special"
+                f"No candidates found for {resolved.full_label} in {year}; if a "
+                f"special election was held that year, reach it with --special"
             )
             raise typer.Exit(code=1)
         timeline = build_timeline(year, matched)

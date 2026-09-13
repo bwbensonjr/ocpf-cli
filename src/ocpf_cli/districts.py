@@ -20,11 +20,23 @@ first:
    no office string maps to two codes. `ocpf race` fetches this field anyway.
    Feed coverage starts abruptly at 2020 (428 rows; 2019 has 13, 2018 has 2), so
    this tier stops there.
-3. **A sweep of the office's code range** via `onballot/finsummaries/{year}/{code}`,
-   labelling each populated code from `filer/{cpfId}.officeSought`, which retains
-   a retired district's code and description. Expensive (76 probes for Senate,
-   164 for House, plus one filer lookup per populated code), so it is last and
-   lazy.
+3. **The special-election report log**, which names the seats that held a
+   special in the year from the filings themselves. This is the only tier that
+   answers for a pre-2020 **odd** year: `onballot/finsummaries` returns nothing
+   for 2007, 2013, 2015, 2017, 2019 or 2020+, and tier 2 starts at 2020, so those
+   years fall between them. Seeded from the memoized sweep in `reports.py`, so it
+   answers only for seats that held a special and is nearly free once `--special`
+   has fetched it. Log rows carry no district code; see `_code_from_filers`.
+4. **A sweep of the office's code range** via `onballot/finsummaries/{year}/{code}`,
+   labelling each populated code from `filer/{cpfId}.officeSought`. Expensive (76
+   probes for Senate, 164 for House, plus one filer lookup per populated code),
+   so it is last and lazy, and it only answers for a year `finsummaries` covers.
+
+A resolved district may carry **no code**. Tier 3 can name a seat the API will
+not number, because `filer/{cpfId}` reports a filer's most recent office and a
+roster whose filers have all moved on says nothing about the seat they once
+sought. Such a district still resolves — reporting it as non-existent because
+only its number is unknown would be a worse answer than omitting the number.
 """
 
 from __future__ import annotations
@@ -41,9 +53,18 @@ LEGISLATIVE_OFFICES = ("House", "Senate")
 
 @dataclass(frozen=True)
 class District:
-    """A single legislative district from the OCPF `districts` reference."""
+    """A single legislative district, as some source named it for some year.
 
-    code: int
+    `code` is optional because the sources that can *name* a district and those
+    that can *code* it are not the same set. The report-log tier knows what a
+    seat was called in a year from the filings themselves, but a log row carries
+    no district code; the code is recovered from the filers who sought the seat,
+    and a roster whose filers have all since sought something else yields none.
+    Such a district still resolves, without a code, rather than being reported as
+    one that never existed. See `resolve_district`.
+    """
+
+    code: int | None
     office: str
     description: str
 
@@ -51,6 +72,17 @@ class District:
     def label(self) -> str:
         """Human label, e.g. `Senate, Suffolk and Middlesex`."""
         return f"{self.office}, {self.description}"
+
+    @property
+    def full_label(self) -> str:
+        """`Senate, 1st Suffolk (code 130)`, dropping the code when unknown.
+
+        Every place that names a district to the user goes through this, so an
+        absent code reads as an omission rather than as `code None`.
+        """
+        if self.code is None:
+            return self.label
+        return f"{self.label} (code {self.code})"
 
 
 class DistrictResolutionError(Exception):
@@ -270,12 +302,141 @@ def sweep_historical_districts(year: int, target: str) -> District | None:
     return None
 
 
+# --------------------------------------------------------------------------
+# Tier 3: the special-election report log
+# --------------------------------------------------------------------------
+
+
+def fetch_log_seats(year: int) -> dict[tuple[str, str], set[int]]:
+    """Seats that held a special election in `year`, mapped to the cpfIds that
+    filed for them, named as the filings named them.
+
+    Seeded from the memoized special-election sweep in `reports`, whose rows pair
+    an era-correct `officeSought` with a parsed reporting period. This is the
+    only source that answers for a year no code source covers -- `finsummaries`
+    returns nothing for 2007, 2013, 2015, 2017, 2019 or 2020+, and the
+    legislative feed starts at 2020.
+
+    Carries no district code: a log row has none, and recovering one costs a
+    request per filer, so that is left to `_code_from_filers` for the seat
+    actually asked about.
+    """
+    from . import reports
+
+    seats: dict[tuple[str, str], set[int]] = {}
+    for stage in reports.SpecialStage:
+        for row in reports.fetch_special_reports(stage):
+            parsed = _parse_office_sought(row.office_sought)
+            if parsed is None:
+                # The sweep also carries municipal, mayoral and Governor's
+                # Council specials; this tier is legislative like the rest.
+                continue
+            if row.period is None or row.period.end.year != year:
+                continue
+            office, description = parsed
+            seats.setdefault((office, description), set()).add(row.cpf_id)
+    return seats
+
+
+def fetch_log_districts(year: int) -> list[District]:
+    """The log's seats for `year` as `District`s, without codes.
+
+    Names only. Codes are recovered per seat, after matching, by
+    `resolve_from_log` -- recovering them for every seat in the year would cost
+    a filer lookup per candidate across every special held that year (roughly
+    forty requests for 2013) to answer about one district.
+    """
+    return [
+        District(code=None, office=office, description=description)
+        for office, description in fetch_log_seats(year)
+    ]
+
+
+def resolve_from_log(year: int, target: str, query: str) -> District | None:
+    """Resolve `target` against the log's seats for `year`, code and all.
+
+    Matching is exact (see `_match_exact`); the code is recovered only for the
+    seats that actually matched, which is one in the normal case and a handful
+    in the ambiguous one.
+    """
+    seats = fetch_log_seats(year)
+    matches = _match_exact(
+        [District(code=None, office=o, description=d) for o, d in seats], target
+    )
+    if not matches:
+        return None
+
+    coded = [
+        District(
+            code=_code_from_filers(
+                d.office, d.description, seats[(d.office, d.description)]
+            ),
+            office=d.office,
+            description=d.description,
+        )
+        for d in matches
+    ]
+    if len(coded) == 1:
+        return coded[0]
+    raise _ambiguous(query, coded)
+
+
+def _code_from_filers(office: str, description: str, cpf_ids: set[int]) -> int | None:
+    """Recover a seat's district code from the filers who sought it.
+
+    `filer/{cpfId}.officeSought` reports a filer's MOST RECENT office, not the
+    one they sought in the year in question, so this is a tally rather than a
+    lookup. A filer whose reported district no longer matches the seat is
+    discarded: Brady (14822) and Diehl (14907) both filed for Senate 2nd Plymouth
+    & Bristol in 2015 and both now report *2nd Plymouth and Norfolk* (code 169),
+    so trusting the modal code without checking the description would return the
+    wrong district entirely.
+
+    Returns None when no filer still names the seat, which is a real case --
+    Senate 1st Hampden & Hampshire 2013 has one filer in the sweep and they have
+    since sought a Governor's Council seat.
+    """
+    target = _normalize(description)
+    tally: dict[int, int] = {}
+    for cpf_id in sorted(cpf_ids):
+        try:
+            payload = api.get_json(f"filer/{cpf_id}")
+        except api.OcpfApiError:
+            continue
+        sought = (payload or {}).get("officeSought") or {}
+        code = sought.get("districtCode")
+        if not isinstance(code, int):
+            continue
+        if (sought.get("officeDescription") or "").strip() != office:
+            continue
+        if _normalize((sought.get("districtDescription") or "").strip()) != target:
+            continue
+        tally[code] = tally.get(code, 0) + 1
+
+    if not tally:
+        return None
+    return max(tally.items(), key=lambda kv: kv[1])[0]
+
+
 def _match(districts: list[District], target: str) -> list[District]:
     """Exact normalized matches, falling back to substring matches."""
     exact = [d for d in districts if _normalize(d.description) == target]
     if exact:
         return exact
     return [d for d in districts if target in _normalize(d.description)]
+
+
+def _match_exact(districts: list[District], target: str) -> list[District]:
+    """Exact normalized matches only -- no substring fallback.
+
+    Used by the log tier, where a substring fallback is unsafe: the tier sees
+    only the seats that held a special in one year, so if that set contains
+    `21st Suffolk` and not `1st Suffolk`, a substring match would resolve a
+    request for the latter to the former with nothing to signal the swap. The
+    higher tiers can afford the fallback because they see the whole map, where
+    an exact match for such a name exists and wins first.
+    """
+    return [d for d in districts if _normalize(d.description) == target]
 
 
 def _ambiguous(query: str, matches: list[District]) -> DistrictResolutionError:
@@ -302,7 +463,7 @@ def resolve_district(
     if districts is None:
         districts = fetch_legislative_districts()
 
-    by_code = {d.code: d for d in districts}
+    by_code = {d.code: d for d in districts if d.code is not None}
 
     # A bare integer is treated as a raw district code.
     stripped = query.strip()
@@ -334,7 +495,15 @@ def resolve_district(
     if len(matches) > 1:
         raise _ambiguous(query, matches)
 
-    # Tier 3: sweep the code ranges for a year the feed does not cover.
+    # Tier 3: the special-election log, which names seats for the years no code
+    # source covers. Memoized, so this is nearly free once `--special` has run,
+    # and it runs before the code-range sweep so the years it answers for stop
+    # paying that sweep's ~20-30 seconds.
+    found = resolve_from_log(year, target, query)
+    if found is not None:
+        return found
+
+    # Tier 4: sweep the code ranges for a year the feed does not cover.
     if year < FIRST_FEED_YEAR:
         found = sweep_historical_districts(year, target)
         if found is not None:
@@ -361,7 +530,7 @@ def _no_match_error(
 
     current = _match(districts, target)
     if current:
-        where = ", ".join(f"{d.label} (code {d.code})" for d in current[:3])
+        where = ", ".join(d.full_label for d in current[:3])
         elsewhere.append(f"the current map has {where}")
 
     if year != FIRST_FEED_YEAR:
@@ -370,7 +539,7 @@ def _no_match_error(
         except api.OcpfApiError:
             earlier = []
         if earlier:
-            where = ", ".join(f"{d.label} (code {d.code})" for d in earlier[:3])
+            where = ", ".join(d.full_label for d in earlier[:3])
             elsewhere.append(f"it existed in {FIRST_FEED_YEAR} as {where}")
 
     if elsewhere:
