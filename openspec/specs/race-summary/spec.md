@@ -83,6 +83,14 @@ district *codes* covers the requested year: where the districts that held a
 special election that year are known by name from the candidates' filings, those
 names SHALL be resolvable.
 
+It SHALL also hold where the converse is true — the district *code* is
+established for the requested year but no candidate who sought that seat still
+reports it as the office they seek. Resolution SHALL NOT depend on whether a
+seat's former candidates ran for it again. Where the candidates' current offices
+cannot name such a code, the system SHALL establish the name from the office
+recorded on the filings those candidates made in the requested year, which names
+the seat as it stood when it was filed for.
+
 A resolved district SHALL carry its district code whenever the code can be
 established from a source that ties it to the requested year. Where a name is
 known for the year but no such source reports a code, the district SHALL still
@@ -144,6 +152,30 @@ district.
   filed for that seat still reports it as the office they sought
 - **THEN** the district resolves with its code absent, and the system does not
   substitute a code the data does not tie to that year
+
+#### Scenario: Seat named from the filings when every candidate has moved on
+
+- **WHEN** the user requests a district by the name it held in a year for which a
+  district-code source has data, but every candidate who sought that seat has
+  since sought a different one — such as `"1st Plymouth and Bristol"` for 2014,
+  whose candidates now report districts 170 and 157
+- **THEN** the system resolves it to the code it held that year rather than
+  reporting that it was not a legislative district that year
+
+#### Scenario: Candidates who stayed put still name the seat
+
+- **WHEN** at least one candidate who sought the seat still reports it as the
+  office they seek
+- **THEN** the system names the district from those candidates and makes no
+  further request, resolving to the same district it resolved to before the
+  filings were consulted
+
+#### Scenario: A code that cannot be named is not reported as non-existent
+
+- **WHEN** a district code carries candidates for the requested year but neither
+  the candidates' current offices nor their filings for that year name it
+- **THEN** the system does not assert that the district did not exist that year
+  on the grounds that only its name is unknown
 
 #### Scenario: Retired district named for a year after its retirement
 

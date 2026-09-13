@@ -258,6 +258,19 @@ all. `ocpf race --special` builds its roster here.
   period into real dates at the sweep boundary and carries neither the money nor
   the HTML any further; do not retrofit that parsing onto the `reportList` rows,
   which already have structured dates.
+- **`CpfId` narrows the log to one filer, and those rows are era-correct.** A
+  row's `officeSought` was written when the filing was, which makes
+  `reports/log?CpfId=` the era-correct complement to `filer/{cpfId}.officeSought`
+  (most-recent-office, above). cpfId 11448 returns 331 rows: 172 reading
+  `Senate 1st Plymouth & Bristol` and 159 `Senate 3rd Bristol and Plymouth`. Use
+  it to name a district code for a year when the seat's filers have all moved on
+  and the filer tally therefore yields nothing — a populated
+  `onballot/finsummaries/{year}/{code}` fixes the *code* by construction, so only
+  the name is ever missing. This is the second half of the tally rule above: the
+  tally answers cheaply when any filer stayed put, the log answers when none did.
+  **Its `reportYear` is unreliable** — `None` across all 331 of those rows — so
+  the parsed `reportingPeriod` is the only year signal; count a straddling window
+  by the year it *ends* in. Behind `reports.offices_sought_in_year`.
 - **Differing windows within one stage are one election, not two.** Candidates
   routinely file different windows for the same special — 43 of the 65
   pre-primary district-years carry more than one distinct period, and every one

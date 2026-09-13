@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Retired districts now resolve for every year they were contested, not only
+  the years a candidate stayed put.** `ocpf race "1st Plymouth and Bristol"`
+  worked for 2010 and 2011 but failed for 2012, 2014, 2016 and 2018 as though
+  the seat had never existed, though OCPF returns its candidates for all six
+  years. Two causes: the historical code sweep started at Senate 105 and so
+  never probed code 104, and where it did reach a code it could only name it by
+  asking each candidate what office they seek *now* — which answers nothing once
+  they have all moved on to other seats. The sweep now covers the retired codes
+  below the current map's floor, and where a seat's former candidates can no
+  longer name it, the name is read from what their filings for that year called
+  it. Lookups that already worked make no additional requests.
+
 ## [0.4.0] - 2026-09-13
 
 Three new commands and a district resolver that understands history. The common

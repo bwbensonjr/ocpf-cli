@@ -443,10 +443,16 @@ def parse_reporting_period(value: Any) -> ReportingPeriod | None:
     return ReportingPeriod(start=start, end=end)
 
 
-def _fetch_log_page(report_type_id: int, start_index: int) -> list[dict]:
-    """Fetch one page of the report log for a report type."""
+def _fetch_log_page(filters: dict[str, Any], start_index: int) -> list[dict]:
+    """Fetch one page of the report log under an arbitrary filter.
+
+    `filters` is the caller's narrowing — `ReportTypeId` for a type sweep,
+    `CpfId` for one filer's history. The log's filters fail **closed** (an
+    unknown `ReportTypeId` returns `[]` rather than the unfiltered database), so
+    a mistyped filter here yields an empty answer, never a plausible wrong one.
+    """
     params = {
-        "ReportTypeId": report_type_id,
+        **filters,
         # 1-based; `StartIndex=0` silently returns PAGE_SIZE-1 records here
         # rather than erroring. See point 2 in the module docstring.
         "StartIndex": start_index,
@@ -463,8 +469,8 @@ def _fetch_log_page(report_type_id: int, start_index: int) -> list[dict]:
     return [row for row in payload if isinstance(row, dict)]
 
 
-def fetch_report_log(report_type_id: int) -> list[dict]:
-    """Fetch every log row for one report type, paging until the log is exhausted.
+def _fetch_filtered_log(filters: dict[str, Any]) -> list[dict]:
+    """Fetch every log row matching `filters`, paging until the log is exhausted.
 
     The log returns a bare list with no `summary`, so a short page is the only
     signal that the last page has been read; `MAX_PAGES` keeps a pathological
@@ -473,7 +479,7 @@ def fetch_report_log(report_type_id: int) -> list[dict]:
     collected: list[dict] = []
 
     for _ in range(MAX_PAGES):
-        items = _fetch_log_page(report_type_id, START_INDEX_BASE + len(collected))
+        items = _fetch_log_page(filters, START_INDEX_BASE + len(collected))
         if not items:
             break
         collected.extend(items)
@@ -487,6 +493,52 @@ def fetch_report_log(report_type_id: int) -> list[dict]:
         )
 
     return collected
+
+
+def fetch_report_log(report_type_id: int) -> list[dict]:
+    """Every log row for one report type, across all filers."""
+    return _fetch_filtered_log({"ReportTypeId": report_type_id})
+
+
+def fetch_filer_log(cpf_id: int) -> list[dict]:
+    """Every log row for one filer, across all report types.
+
+    Bounded by one filer's filing history rather than by a whole report type:
+    cpfId 11448, a six-term senator, returns 331 rows — one page at `PAGE_SIZE`.
+    """
+    return _fetch_filtered_log({"CpfId": cpf_id})
+
+
+def offices_sought_in_year(cpf_id: int, year: int) -> list[str]:
+    """The offices a filer's filings name for `year`, as the filings named them.
+
+    This is the era-correct counterpart to `filer/{cpfId}.officeSought`, which
+    reports a filer's **most recent** office and so cannot say what seat they
+    sought in a given year. A log row's `officeSought` was written when the
+    filing was: cpfId 11448 returns 331 rows, 172 reading
+    `Senate 1st Plymouth & Bristol` and 159 `Senate 3rd Bristol and Plymouth`,
+    separable only by the period.
+
+    The year comes from the parsed `reportingPeriod` rather than from the row's
+    `reportYear`, which is unreliable — it is `None` across all 331 of those
+    rows. A filing whose window straddles a year boundary counts for the year it
+    **ends** in, matching how the special-election sweep groups.
+
+    Returns one string per matching row, repeats included, so the caller can
+    tally. Money and `amendmentDisplay` are deliberately not read: the log
+    returns every amendment generation of a filing, so its totals identify a
+    version rather than a candidate. Every generation carries the same office
+    string, which is why that field is safe to read here where the money is not.
+    """
+    offices: list[str] = []
+    for row in fetch_filer_log(cpf_id):
+        period = parse_reporting_period(row.get("reportingPeriod"))
+        if period is None or period.end.year != year:
+            continue
+        office = " ".join((row.get("officeSought") or "").split())
+        if office:
+            offices.append(office)
+    return offices
 
 
 def _normalize_log_row(row: dict) -> SpecialReportRow | None:
