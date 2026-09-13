@@ -77,6 +77,133 @@ def test_ambiguous_middlesex_lists_candidates():
     assert codes == {151, 166, 115, 116}
 
 
+# --- ambiguity is resolved against the requested year, not the present map ---
+
+# The live shape: `Plymouth and Norfolk` was one Senate seat through the 2011
+# cycle (code 127); the 2021 map split it into two, whose names it prefixes.
+SPLIT_PRESENT = [
+    District(code=167, office="Senate", description="1st Plymouth and Norfolk"),
+    District(code=169, office="Senate", description="2nd Plymouth and Norfolk"),
+]
+RETIRED_SEAT = District(code=127, office="Senate", description="Plymouth & Norfolk")
+
+
+def test_present_map_ambiguity_defers_to_the_years_feed(monkeypatch):
+    """Tier 1 over-matching must not end resolution: it has no year."""
+    monkeypatch.setattr(
+        districts, "fetch_year_districts", lambda year: [RETIRED_SEAT]
+    )
+    found = resolve_district("Plymouth and Norfolk", 2020, SPLIT_PRESENT)
+    assert (found.code, found.description) == (127, "Plymouth & Norfolk")
+
+
+def test_present_map_ambiguity_defers_to_the_sweep_for_a_pre_feed_year(monkeypatch):
+    """For a year the feed does not cover, tier 4 answers instead."""
+    monkeypatch.setattr(
+        districts,
+        "sweep_historical_districts",
+        lambda year, target: RETIRED_SEAT,
+    )
+    found = resolve_district("Plymouth and Norfolk", 2016, SPLIT_PRESENT)
+    assert found.code == 127
+
+
+def test_ambiguity_survives_when_the_years_map_cannot_narrow_it(monkeypatch):
+    """A current year: the year's map IS the current field, so it collides too.
+
+    This is why the fall-through needs no redistricting cutoff.
+    """
+    monkeypatch.setattr(districts, "fetch_year_districts", lambda year: SPLIT_PRESENT)
+    with pytest.raises(DistrictResolutionError) as exc:
+        resolve_district("Plymouth and Norfolk", 2024, SPLIT_PRESENT)
+    assert {c.code for c in exc.value.candidates} == {167, 169}
+
+
+def test_two_exact_matches_stay_ambiguous():
+    """`1st Suffolk` names a House seat and a Senate seat.
+
+    Exact matches beat substring matches, but a set of exact matches larger
+    than one is still ambiguous -- "let an exact match win" would silently pick
+    one of these.
+    """
+    both = [
+        District(code=130, office="Senate", description="1st Suffolk"),
+        District(code=323, office="House", description="1st Suffolk"),
+    ]
+    with pytest.raises(DistrictResolutionError) as exc:
+        resolve_district("1st Suffolk", 2024, both)
+    assert {c.code for c in exc.value.candidates} == {130, 323}
+
+
+def test_unique_tier_one_match_short_circuits(monkeypatch):
+    """Nothing that resolves today may change answer or cost."""
+    calls: list[int] = []
+
+    def fail(year):
+        calls.append(year)
+        raise AssertionError("tier 2 must not run for a unique tier-1 match")
+
+    monkeypatch.setattr(districts, "fetch_year_districts", fail)
+    assert resolve_district("Suffolk and Middlesex", 2026, DISTRICTS).code == 166
+    assert calls == []
+
+
+def test_unresolvable_ambiguity_is_reported_against_the_year(monkeypatch):
+    """The candidates offered must not be silent dead ends.
+
+    Where they come from the present map, the message says so, because
+    following one yields "No candidates found" for the requested year.
+    """
+    monkeypatch.setattr(districts, "fetch_year_districts", lambda year: [])
+    with pytest.raises(DistrictResolutionError) as exc:
+        resolve_district("Plymouth and Norfolk", 2016, SPLIT_PRESENT)
+    assert "2016" in str(exc.value)
+    assert {c.code for c in exc.value.candidates} == {167, 169}
+
+
+# --- numeric codes are validated against the requested year ---
+
+
+def test_numeric_code_accepted_from_the_years_feed(monkeypatch):
+    """A code the tool prints for a year is a code it accepts for that year.
+
+    Code 127 is absent from the present map but carried by the 2020 feed.
+    """
+    monkeypatch.setattr(
+        districts, "fetch_year_districts", lambda year: [RETIRED_SEAT]
+    )
+    found = resolve_district("127", 2020, SPLIT_PRESENT)
+    assert (found.code, found.description) == (127, "Plymouth & Norfolk")
+
+
+def test_numeric_code_in_the_present_map_makes_no_feed_request(monkeypatch):
+    def fail(year):
+        raise AssertionError("the present map must short-circuit a current code")
+
+    monkeypatch.setattr(districts, "fetch_year_districts", fail)
+    assert resolve_district("166", 2026, DISTRICTS).code == 166
+
+
+def test_numeric_code_still_falls_back_to_the_finsummaries_lookup(monkeypatch):
+    """The pre-2020 path is unchanged; the feed tier is additive."""
+    monkeypatch.setattr(districts, "fetch_year_districts", lambda year: [])
+    monkeypatch.setattr(
+        districts,
+        "_district_for_code",
+        lambda year, code: District(
+            code=140, office="Senate", description="Worcester & Norfolk"
+        ),
+    )
+    assert resolve_district("140", 2010, DISTRICTS).code == 140
+
+
+def test_numeric_code_unknown_in_every_source_still_errors(monkeypatch):
+    monkeypatch.setattr(districts, "fetch_year_districts", lambda year: [])
+    with pytest.raises(DistrictResolutionError) as exc:
+        resolve_district("99999", 2020, DISTRICTS)
+    assert "2020" in str(exc.value)
+
+
 def test_no_match_errors_without_candidates():
     with pytest.raises(DistrictResolutionError) as exc:
         resolve_district("Nonexistent County", 2026, DISTRICTS)

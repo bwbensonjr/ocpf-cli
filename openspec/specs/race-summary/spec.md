@@ -71,6 +71,11 @@ numeric district code or a name matched case-insensitively against district
 descriptions, and it SHALL restrict matches to legislative offices (House and
 Senate).
 
+A numeric district code SHALL be validated against the map for the **requested
+year**, not only against the present map. A code that a year-scoped source
+reports for that year SHALL be accepted for it. In particular, any district code
+the system itself reports for a year SHALL be accepted as input for that year.
+
 Name matching SHALL be tolerant of notation that varies between sources: `&` and
 `and` are equivalent, and ordinal words (`First`, `Second`, `Third`) are
 equivalent to their numeric forms (`1st`, `2nd`, `3rd`). Word order remains
@@ -98,6 +103,19 @@ resolve, with its code absent. The system SHALL NOT substitute a code drawn from
 a different year, and SHALL NOT report a district as non-existent on the grounds
 that only its code is unknown.
 
+Where a name matches more than one district in the present map, the system SHALL
+NOT report that as ambiguous without first consulting the map for the requested
+year. Where the year's map yields exactly one match, that district SHALL be
+resolved. Ambiguity SHALL be reported only when the requested year's own map
+cannot narrow the field, and the candidates offered SHALL be districts that
+existed in that year.
+
+Within any one map, an exact name match SHALL take precedence over a match that
+is merely a prefix or substring. This precedence SHALL NOT collapse a genuine
+ambiguity: where a name matches more than one district *exactly* — as a numbered
+district name shared by a House and a Senate seat does — the result remains
+ambiguous.
+
 When a name cannot be placed in the requested year at all, the system SHALL say
 so in terms of that year rather than asserting the name is not a legislative
 district.
@@ -107,6 +125,19 @@ district.
 - **WHEN** the user passes a value that is a valid legislative district code
 - **THEN** the system uses that code without name matching
 
+#### Scenario: A code the system prints is a code it accepts
+
+- **WHEN** the system reports a district code for a year, such as code 140 for
+  `"Worcester and Norfolk"` in 2020
+- **THEN** passing that code for that same year resolves to the same district
+
+#### Scenario: Retired code accepted for a year a year-scoped source reports it
+
+- **WHEN** the user passes a district code that the present map omits but a
+  year-scoped source reports for the requested year, such as code 127 for 2020
+- **THEN** the system resolves it rather than reporting it is not a legislative
+  district code in that year
+
 #### Scenario: Unique name match
 
 - **WHEN** the district name matches exactly one legislative district description
@@ -114,10 +145,31 @@ district.
 
 #### Scenario: Ambiguous name match
 
-- **WHEN** the district name matches more than one legislative district (e.g.
-  `Middlesex` matches several)
+- **WHEN** the district name matches more than one legislative district in the
+  requested year (e.g. `Middlesex` matches several)
 - **THEN** the system prints the matching districts with their codes and offices
   and exits without guessing
+
+#### Scenario: Retired name that prefixes two current district names
+
+- **WHEN** the user requests a district whose name matches two districts in the
+  present map only as a prefix, but exactly one district in the requested year's
+  map — such as `"Plymouth and Norfolk"` for 2016 or 2020, which the present map
+  splits into `1st Plymouth and Norfolk` and `2nd Plymouth and Norfolk`
+- **THEN** the system resolves it to the single district of that name in the
+  requested year rather than reporting it as ambiguous
+
+#### Scenario: Ambiguity candidates are districts of the requested year
+
+- **WHEN** a name is genuinely ambiguous for the requested year
+- **THEN** the districts offered are ones that existed in that year, and the
+  system does not suggest districts that did not
+
+#### Scenario: An exact match does not collapse a genuine ambiguity
+
+- **WHEN** a name matches more than one district exactly, such as `"1st Suffolk"`
+  naming both a House and a Senate seat
+- **THEN** the result remains ambiguous and the system exits without guessing
 
 #### Scenario: Near-collision names are distinguished
 

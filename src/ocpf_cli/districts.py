@@ -510,11 +510,22 @@ def _match_exact(districts: list[District], target: str) -> list[District]:
     return [d for d in districts if _normalize(d.description) == target]
 
 
-def _ambiguous(query: str, matches: list[District]) -> DistrictResolutionError:
-    return DistrictResolutionError(
-        f'"{query}" matches more than one legislative district',
-        candidates=matches,
-    )
+def _ambiguous(
+    query: str, matches: list[District], *, year: int | None = None
+) -> DistrictResolutionError:
+    """Ambiguity, with the candidates the caller can actually act on.
+
+    `year` is passed when the candidates come from the present map rather than
+    from a year-scoped source, because then they may not have existed in the
+    requested year and following one leads to "No candidates found". Saying so is
+    the difference between a list of options and a list of dead ends.
+    """
+    message = f'"{query}" matches more than one legislative district'
+    if year is not None:
+        message += (
+            f"; no source places it in {year}, and these are today's districts"
+        )
+    return DistrictResolutionError(message, candidates=matches)
 
 
 def resolve_district(
@@ -536,12 +547,23 @@ def resolve_district(
 
     by_code = {d.code: d for d in districts if d.code is not None}
 
-    # A bare integer is treated as a raw district code.
+    # A bare integer is treated as a raw district code. It is validated against
+    # the map for the REQUESTED YEAR, reading the same sources in the same order
+    # as the name path below, so that a code this tool prints for a year is a
+    # code it accepts for that year. Validating only against the present map and
+    # `finsummaries` accepted codes for exactly the years `finsummaries` covers
+    # and rejected them afterwards -- `ocpf race` would report code 140 for 2020
+    # and then refuse 140 as input for 2020.
     stripped = query.strip()
     if stripped.lstrip("-").isdigit():
         code = int(stripped)
         if code in by_code:
             return by_code[code]
+        # Tier 2: the year's feed, which carries `districtCodeSought` from 2020
+        # on -- the years `finsummaries` does not cover.
+        for district in fetch_year_districts(year):
+            if district.code == code:
+                return district
         historical = _district_for_code(year, code)
         if historical is not None:
             return historical
@@ -552,11 +574,21 @@ def resolve_district(
     target = _normalize(query)
 
     # Tier 1: the current map. Short-circuits with no extra request.
+    #
+    # An ambiguity here does NOT end resolution. The present map has no year, so
+    # a name over-matched in it says nothing about the year the caller asked
+    # about: `Plymouth and Norfolk` matches `1st ...` and `2nd ...` as prefixes
+    # today, while the 2016 and 2020 maps each hold exactly one district of that
+    # name (code 127). Falling through treats an over-matched name the same way
+    # an absent one is already treated -- tier 1 cannot answer for this year --
+    # and needs no redistricting cutoff, because in a current year the year's map
+    # IS the current field and reports the ambiguity itself.
     matches = _match(districts, target)
     if len(matches) == 1:
         return matches[0]
-    if len(matches) > 1:
-        raise _ambiguous(query, matches)
+    # Held for the error, so a failure that reaches no year-scoped source can
+    # still say where the name is known.
+    current_matches = matches
 
     # Tier 2: the year's feed, which names districts as they stood then.
     year_districts = fetch_year_districts(year)
@@ -579,6 +611,13 @@ def resolve_district(
         found = sweep_historical_districts(year, target)
         if found is not None:
             return found
+
+    # No year-scoped source could narrow the field. If the present map was
+    # ambiguous, that is still the most specific thing known about the name, so
+    # report it as ambiguity rather than as no match -- but say it in terms of
+    # the requested year, since these districts may not have existed then.
+    if len(current_matches) > 1:
+        raise _ambiguous(query, current_matches, year=year)
 
     raise _no_match_error(query, target, year, districts)
 
