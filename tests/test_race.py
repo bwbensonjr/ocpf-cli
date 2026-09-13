@@ -679,3 +679,47 @@ def test_regular_path_issues_no_special_requests(monkeypatch):
         "filingSchedules/2026",
     ]
     assert reports.REPORT_LOG_PATH not in calls
+
+
+# --- Optional district code ---------------------------------------------------
+
+
+def test_filter_by_district_matches_nothing_without_a_code():
+    # `row.get(...)` is None for a row with no code, so a plain `== code`
+    # against a None code would match every such row.
+    rows = [
+        {"filerName": "No code at all"},
+        {"filerName": "Explicit None", "districtCodeSought": None, "districtCodeHeld": None},
+        {"filerName": "Historical zero", "districtCodeSought": 0, "districtCodeHeld": 0},
+        {"filerName": "Real district", "districtCodeSought": 214, "districtCodeHeld": -1},
+    ]
+
+    assert race.filter_by_district(rows, None) == []
+    assert [r["filerName"] for r in race.filter_by_district(rows, 214)] == ["Real district"]
+
+
+def test_is_incumbent_is_false_without_a_code():
+    assert race._is_incumbent({"districtCodeHeld": None}, None) is False
+    assert race._is_incumbent({}, None) is False
+
+
+def test_special_header_and_json_omit_an_absent_code(monkeypatch):
+    log_rows = [
+        _log(1, "Franco, Michael", "Senate 1st Hampden & Hampshire", "9/21/13 - 10/18/13", 11, GENERAL)
+    ]
+    filings = {
+        1: [_filing(11, "Pre-election Report (Special)", "9/21/2013", "10/18/2013", "$5.00", "$6.00")]
+    }
+    _install_special(monkeypatch, log_rows, filings)
+
+    district = District(code=None, office="Senate", description="1st Hampden & Hampshire")
+    monkeypatch.setattr(race, "resolve_district", lambda q, y, districts=None: district)
+
+    result = runner.invoke(app, ["race", "whatever", "--year", "2013", "--special"])
+    assert result.exit_code == 0, result.output
+    assert "District:  Senate, 1st Hampden & Hampshire" in result.output
+    assert "code None" not in result.output
+
+    result = runner.invoke(app, ["race", "whatever", "--year", "2013", "--special", "--json"])
+    payload = json.loads(result.stdout)
+    assert payload[0]["districtCode"] is None
