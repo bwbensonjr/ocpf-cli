@@ -40,7 +40,22 @@ ocpf race <district> [--year <year>] [--json]
   district descriptions (`&` and `and` are treated alike) or a **raw numeric
   district code**. Ambiguous names are never guessed — the tool prints the
   matching districts with their codes and exits so you can pick one.
-- `--year` defaults to the current calendar year.
+- `--year` defaults to the current calendar year, and **district names resolve
+  against the map as it stood in that year**. A district retired at
+  redistricting is still reachable for the years it existed:
+  `ocpf race "Worcester and Norfolk" --year 2020` resolves to Senate code 140,
+  which no longer appears in OCPF's current district list. Asking for a year in
+  which the name was not a district says so and names where it was, rather than
+  claiming the name is invalid.
+- Ordinal words are matched alike to their digit forms, so
+  `"First Plymouth & Norfolk"` and `"1st Plymouth and Norfolk"` reach the same
+  district. Word order still matters: `"Middlesex & Suffolk"` and
+  `"Suffolk and Middlesex"` are two different seats.
+- Resolving a **pre-2020** retired district costs a sweep of the office's code
+  range (76 requests for Senate, 164 for House, plus a lookup per populated
+  code) because no year-scoped district list exists. Progress goes to stderr;
+  expect roughly 20-30 seconds. Current districts and 2020-onward years are
+  unaffected and cost nothing extra.
 - `--json` emits the merged, filtered candidate records (including the
   underlying `*Numeric` values) as JSON to stdout. Human status/progress goes
   to stderr, so JSON output stays pipeable.

@@ -48,7 +48,25 @@ drove this design:
 - `districtCodeHeld == -1` marks a non-incumbent; an incumbent's
   `districtCodeHeld` equals the district code.
 - `districts` returns 365 rows of `{office, code, description, ...}`. Filter to
-  `office in {"House", "Senate"}` for legislative resolution.
+  `office in {"House", "Senate"}` for legislative resolution (200 rows: 160
+  House, 40 Senate). It is **strictly the present map** and omits retired codes
+  entirely — code 140, Senate Worcester & Norfolk through the 2011 cycle,
+  appears under no office. There is no year-scoped list: `districts/{year}`
+  returns `[]` and `onballot/districts/{year}` is a 404.
+- Era-correct district names come from two places instead:
+  - The legislative YTD feed pairs an `officeSought` string with a usable
+    `districtCodeSought` on every row — `"Senate, Worcester & Norfolk"` with
+    code 140 for 2020, and no office string maps to two codes. Feed coverage
+    starts abruptly at 2020 (428 rows; 2019 has 13, 2018 has 2, 2017 has 0), so
+    this only answers for 2020 and later.
+  - `filer/{cpfId}` returns `officeSought` as an object carrying
+    `districtCode` **and** `districtDescription`, and retains them for a filer
+    whose district no longer exists — cpfId 10315 still reports code 140 /
+    `Worcester & Norfolk` a decade after that seat was retired. This is the only
+    handle on a pre-2020 retired district, reached by sweeping
+    `onballot/finsummaries/{year}/{code}` for populated codes (those rows carry
+    `districtCode: 0` and no district name, so the code is known only from the
+    URL and the name only from the filers).
 - `filingSchedules/{year}` provides `primaryElectionDate` and
   `generalElectionDate` (timeline context only — money is never split by
   election).
