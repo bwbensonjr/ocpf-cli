@@ -23,6 +23,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`ocpf race <district> --year <year> --special` summarizes a special
+  election**, which the on-ballot and legislative feeds carry none of — so a year
+  with no regular contest previously looked empty (`ocpf race "6th Bristol"
+  --year 2013` reported no candidates for a seat two people contested that
+  September). The roster is built from the candidates' own special-election
+  filings via a sweep of `reports/log`, the API's only cross-filer path, which
+  reaches even years as well as odd: a district can hold a special in March and
+  its regular contest the same November, and the two rosters differ.
+  `--stage primary|general` selects the stage, defaulting to the general and
+  naming the primary when one was held. Money comes from each candidate's
+  *operative* filing rather than the sweep rows, which return every amendment
+  generation — reading them would have understated one 2013 candidate by 36%.
+  The header names the reporting period the figures cover and no election date,
+  which OCPF does not publish for specials. `--json` carries each candidate's
+  cpfId, numeric figures, filing window, and the report id each figure came
+  from.
+- Asking for a district in a year with no regular election now names `--special`
+  in the error rather than only reporting that no candidates were found.
 - `ocpf totals <filer> --start <date> --end <date>` reports the record count and
   total a committee received or paid over an explicit closed window, with
   `--category receipts|expenditures` and `--json`. Both bounds are required and

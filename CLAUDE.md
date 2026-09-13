@@ -18,7 +18,8 @@ src/ocpf_cli/
   resolve.py        # filer arg (cpfId or legislative name) -> cpfId
   search.py         # `search/items` client: paging, completeness, shape guards
   reports.py        # report endpoints: base-type fan-out, paging, not-found
-  commands/race.py  # `ocpf race` — fetch/merge/filter/timeline/render
+  commands/race.py  # `ocpf race` — fetch/merge/filter/timeline/render, plus
+                    #   the `--special` roster path (sweep -> stage -> filings)
   commands/filer.py # `ocpf filer` — profile, YTD, recent reports
   commands/expenditures.py  # `ocpf expenditures` — payments made
   commands/reports.py       # `ocpf reports` / `ocpf report` — filings
@@ -176,13 +177,52 @@ them.
 - `reports/log` is the other way in: one request, every report type, and the
   **only cross-filer path** in the API (`ReportTypeId`, `Name` and `CpfId`
   filters, all failing *closed* — an unknown `ReportTypeId` returns `[]`). It is
-  not used by the commands because its rows are built for a web table:
+  not used by the *per-filer* path because its rows are built for a web table:
   `reportingPeriod` arrives in at least three incompatible shapes
   (`7/1/19 - 12/31/19`, `9/1 - 9/30/2026` with no start year, and a bare
   `1/13/26` that is not a range) and `amendmentDisplay` contains literal HTML
   (`<br>Amendment`). It returns the same report set as the `reportList` fan-out
   (517 each for cpfId 14454). Cross-filer work needs it and must parse those
-  formats; keep that confined to the log path.
+  formats; that parsing is confined to the sweep below.
+
+#### `reports/log` — the cross-filer sweep
+
+`reports/log` is the **only cross-filer path in the API**, and the only way to
+answer "which filers sought this seat": `reportList` cannot be queried without a
+cpfId, and the on-ballot and legislative feeds carry no special elections at
+all. `ocpf race --special` builds its roster here.
+
+- **Its filters fail CLOSED**, unlike `search/items`: an unknown `ReportTypeId`
+  (99999) returns `[]` rather than the unfiltered database. A mistyped filter
+  here yields an empty answer, not a plausible wrong one.
+- **The special-election report types are small and sweepable.** `ReportTypeId=22`
+  is pre-primary special (**563 rows**) and `23` is pre-election special (**556**),
+  two requests each at `PageSize=500`. Both the depository and non-depository
+  spelling of a stage share one id — `Pre-Primary Report (Special)` and
+  `Pre-primary Report (Special) (ND)` are both 22 — so one id per stage covers
+  both filing regimes.
+- **It returns a BARE LIST with no `summary`**, so a short page is the only
+  termination signal. `StartIndex` is 1-based here too, but `StartIndex=0`
+  silently returns `PageSize - 1` rows instead of erroring.
+- **There is no server-side date or district filter.** `StartIndex`, `PageSize`,
+  `Name`, `CpfId`, `ReportTypeId` and `ReportTypeCategory` are the whole list, so
+  year and district narrowing happen locally over the whole swept type.
+- **A log row's money is unsafe.** The log returns *every amendment generation*
+  of a filing: cpfId 15658 has four pre-election special rows for
+  7/27/2013-8/23/2013, at `$9,940.00` as filed rising to `$13,530.00`. A row's
+  total identifies a version, not a candidate — picking the wrong one understates
+  that filer by 36%. Money must come from `fetch_reports(cpf_id)`, whose
+  `OnlyCurrent=true` default leaves exactly the operative version.
+- **Its `reportingPeriod` is a display string** in several shapes, and
+  `amendmentDisplay` is literal HTML (`<br>Amendment`). `reports.py` parses the
+  period into real dates at the sweep boundary and carries neither the money nor
+  the HTML any further; do not retrofit that parsing onto the `reportList` rows,
+  which already have structured dates.
+- **Differing windows within one stage are one election, not two.** Candidates
+  routinely file different windows for the same special — 43 of the 65
+  pre-primary district-years carry more than one distinct period, and every one
+  collapses to a single election once overlapping windows are merged. Span them;
+  do not treat them as rival races.
 
 Report types carry both a depository and a non-depository spelling of the same
 thing — `Pre-Election Report (Special)` and `Pre-election Report (Special) (ND)`
