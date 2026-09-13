@@ -45,6 +45,10 @@ CATEGORY_EXPENDITURES = "B"
 CATEGORY_RECEIPTS = "R"
 CATEGORY_SUBVENDOR = "S"
 
+# `StartIndex` is a 1-BASED record offset; see point 2 in the module docstring.
+# Named so a reader who assumes 0-based indexing does not "fix" it.
+START_INDEX_BASE = 1
+
 # Records per request. A committee's full expenditure history is typically
 # ~1,000 records, so this keeps most filers to one or two calls.
 PAGE_SIZE = 1000
@@ -110,7 +114,7 @@ def fetch_items(params: dict[str, Any]) -> list[dict]:
     expected: int | None = None
 
     for _ in range(MAX_PAGES):
-        items, page_expected = _fetch_page(params, len(collected) + 1)
+        items, page_expected = _fetch_page(params, START_INDEX_BASE + len(collected))
         if page_expected is not None:
             expected = page_expected
 
@@ -191,3 +195,114 @@ def fetch_expenditures(cpf_id: int) -> list[dict]:
         )
 
     return annotate(items)
+
+
+def format_api_date(value: date) -> str:
+    """Format a date the way this API's date parameters expect: `M/D/YYYY`."""
+    return f"{value.month}/{value.day}/{value.year}"
+
+
+def fetch_summary(
+    params: dict[str, Any],
+    *,
+    start: date | None = None,
+    end: date | None = None,
+) -> tuple[dict, dict | None]:
+    """Fetch the API's own count and total for the filtered set, in one request.
+
+    `summary` describes the WHOLE filtered set rather than the returned page, so
+    a `PageSize` of 1 answers a scalar question at the cost of one request and
+    one record. That record is not waste: it is the evidence that the filter was
+    applied.
+
+    When `start`/`end` are given, the sample record's date is checked against
+    them. This is the guard that makes a summary-only fetch safe on an endpoint
+    where an unrecognized filter parameter is ignored rather than rejected (see
+    point 3 in the module docstring) — an ignored date bound would return the
+    filer's entire history with a plausible, larger total and no error at all.
+    One in-window record does not prove every counted record is in-window, but it
+    turns the likely failure from a wrong number into a raised error.
+    """
+    page_params = dict(params)
+    page_params["StartIndex"] = START_INDEX_BASE
+    page_params["PageSize"] = 1
+    page_params["withSummary"] = "true"
+
+    payload = api.get_json(SEARCH_ITEMS_PATH, params=page_params)
+    if not isinstance(payload, dict):
+        raise api.OcpfApiError(
+            "search/items returned an unexpected response shape",
+            path=SEARCH_ITEMS_PATH,
+        )
+
+    summary = payload.get("summary")
+    if not isinstance(summary, dict):
+        # Without a summary there is no total. Returning zero here would be a
+        # confident wrong answer; the caller asked for a figure, not a guess.
+        raise api.OcpfApiError(
+            "search/items returned no summary; refusing to report a total",
+            path=SEARCH_ITEMS_PATH,
+        )
+
+    items = payload.get("items") or []
+    sample = items[0] if isinstance(items, list) and items else None
+
+    if sample is not None and (start is not None or end is not None):
+        when = _parse_date(sample.get("date"))
+        outside = when is not None and (
+            (start is not None and when < start) or (end is not None and when > end)
+        )
+        if outside:
+            raise api.OcpfApiError(
+                f"search/items returned a record dated {sample.get('date')} for a "
+                f"query bounded to {start}..{end}; the date filter was not "
+                f"applied, refusing to report a total over an unknown period",
+                path=SEARCH_ITEMS_PATH,
+            )
+
+    return summary, sample
+
+
+def fetch_category_total(
+    cpf_id: int,
+    category: str,
+    start: date,
+    end: date,
+) -> tuple[int, float]:
+    """Return `(count, total)` for one filer, one record kind, one closed window.
+
+    `category` must be one of the module's `CATEGORY_*` constants, never a
+    user-supplied string: an unrecognized `SearchTypeCategory` silently returns
+    receipts (point 1 in the module docstring). When expenditures were asked for,
+    the sample record is shape-checked as a second line of defense, so a
+    mis-wired constant fails loudly rather than reporting money received as money
+    paid.
+    """
+    if category not in (CATEGORY_RECEIPTS, CATEGORY_EXPENDITURES, CATEGORY_SUBVENDOR):
+        raise ValueError(f"unknown search category {category!r}")
+
+    summary, sample = fetch_summary(
+        {
+            "CpfId": cpf_id,
+            "SearchTypeCategory": category,
+            "StartDate": format_api_date(start),
+            "EndDate": format_api_date(end),
+        },
+        start=start,
+        end=end,
+    )
+
+    if (
+        category == CATEGORY_EXPENDITURES
+        and sample is not None
+        and _looks_like_receipt(sample)
+    ):
+        raise api.OcpfApiError(
+            "search/items returned contribution records for an expenditure "
+            "query; refusing to report money received as money spent",
+            path=SEARCH_ITEMS_PATH,
+        )
+
+    count = summary.get("count") or 0
+    total = render.parse_currency(summary.get("total"))
+    return int(count), total

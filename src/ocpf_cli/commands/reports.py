@@ -25,6 +25,7 @@ from typing import Any
 import typer
 
 from .. import api, render, reports as reports_api
+from ..options import parse_date_option
 from ..resolve import FilerResolutionError, resolve_filer
 
 # User-facing schedule names -> the report payload's field names. The mapping
@@ -215,8 +216,6 @@ def reports(
     Covers the filer's whole filing history. Narrow a long listing with --type
     ("pre-election", "year-end"), --year, or --limit.
     """
-    from .expenditures import parse_date_option
-
     try:
         since_date = parse_date_option(since, "--since")
         until_date = parse_date_option(until, "--until")

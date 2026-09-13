@@ -88,6 +88,22 @@ Response shape is
 `StartDate`/`EndDate`, `MinAmount`/`MaxAmount`, `PageSize`, `StartIndex`,
 `withSummary`.
 
+**`summary` describes the whole filtered set, not the returned page**, so
+`withSummary=true` with `PageSize=1` answers a scalar question ("how much did
+this filer raise between these dates?") in a single request, with no paging.
+`StartDate`/`EndDate` are real parameters — inclusive, `M/D/YYYY`, composable
+with `CpfId`, working across year boundaries and back to at least 2010. Verified
+for cpfId 14902: `1/1/2024`-`10/31/2024` gives 1,277 receipts / $401,190.59,
+where the full calendar year gives 1,646 / $560,090.46.
+
+That gap is the reason `ocpf totals` exists: a year-to-date figure fetched after
+a cycle includes post-election money, which follows the outcome. But note the
+hazard this creates — because a misnamed filter here is *ignored* rather than
+rejected, an ignored date bound returns the filer's entire history (15,411
+records for the same filer) looking exactly like a valid, larger answer. Any
+summary-only query must verify the bound was applied; `search.fetch_summary`
+does this by checking the one record it gets back falls inside the window.
+
 Expenditure items carry `vendor`, `purpose`, `clarifiedName`,
 `clarifiedPurpose`, `date` (`M/D/YYYY`), `amount` (a **display string** like
 `"$1,234.56"`, not a number), `recordTypeDescription`, `reportId`, and

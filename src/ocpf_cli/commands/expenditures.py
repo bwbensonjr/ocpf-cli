@@ -14,12 +14,15 @@ from __future__ import annotations
 
 import sys
 from collections import OrderedDict
-from datetime import date, datetime
+from datetime import date
 from typing import Any
 
 import typer
 
 from .. import api, render, search
+# Re-exported: `parse_date_option` was defined here before other commands
+# needed it, and callers and tests still reach it through this module.
+from ..options import parse_date_option
 from ..resolve import FilerResolutionError, resolve_filer
 
 # `recordTypeDescription` values that mean the payee string came off a bank
@@ -67,18 +70,6 @@ def _purpose(item: dict) -> str:
 
 def _is_bank_reported(item: dict) -> bool:
     return BANK_REPORTED_MARKER in (item.get("recordTypeDescription") or "").lower()
-
-
-def parse_date_option(value: str | None, flag: str) -> date | None:
-    """Parse a `--since`/`--until` value as `YYYY-MM-DD` or OCPF's `M/D/YYYY`."""
-    if not value:
-        return None
-    for fmt in ("%Y-%m-%d", "%m/%d/%Y"):
-        try:
-            return datetime.strptime(value.strip(), fmt).date()
-        except ValueError:
-            continue
-    raise ValueError(f"{flag} expects a date like 2026-01-31 or 1/31/2026, got {value!r}")
 
 
 def filter_items(

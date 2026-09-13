@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `ocpf totals <filer> --start <date> --end <date>` reports the record count and
+  total a committee received or paid over an explicit closed window, with
+  `--category receipts|expenditures` and `--json`. Both bounds are required and
+  the window is reported with the figure, because a published year-to-date
+  number is a full calendar year and so includes money raised after the
+  election — 28% of cpfId 14902's 2024 receipts and 70% of its 2020 receipts
+  arrived after October 31.
+
 - `ocpf reports <filer>` lists the reports a committee has filed — pre-election,
   pre-primary, post-election, special-election, mid-year, year-end, deposit and
   bank reports — with `--type`, `--year`, `--since`/`--until`, `--limit`,

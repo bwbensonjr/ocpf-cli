@@ -10,6 +10,7 @@ from .commands.expenditures import expenditures
 from .commands.filer import filer
 from .commands.race import race
 from .commands.reports import report, reports
+from .commands.totals import totals
 
 app = typer.Typer(
     name="ocpf",
@@ -65,6 +66,7 @@ app.command("filer")(filer)
 app.command("expenditures")(expenditures)
 app.command("reports")(reports)
 app.command("report")(report)
+app.command("totals")(totals)
 
 
 if __name__ == "__main__":

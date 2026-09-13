@@ -227,3 +227,134 @@ def test_parse_date_rejects_out_of_range():
     assert search._parse_date("13/45/2026") is None
     assert search._parse_date("1/2") is None
     assert search._parse_date(12345) is None
+
+
+# --- summary fetch (date-bounded totals) ---
+
+
+def _summary_response(monkeypatch, *, summary, items, calls=None):
+    def fake(path, params=None, **kwargs):
+        if calls is not None:
+            calls.append(params)
+        return {"summary": summary, "items": items}
+
+    monkeypatch.setattr(api, "get_json", fake)
+
+
+def test_fetch_summary_issues_one_request_with_a_one_based_offset(monkeypatch):
+    calls: list = []
+    _summary_response(
+        monkeypatch,
+        summary={"count": 1277, "total": 401190.59},
+        items=[_expenditure(1)],
+        calls=calls,
+    )
+
+    summary, sample = search.fetch_summary({"CpfId": 14902})
+
+    assert len(calls) == 1
+    assert calls[0]["StartIndex"] == 1
+    assert calls[0]["StartIndex"] != 0
+    assert calls[0]["PageSize"] == 1
+    assert calls[0]["withSummary"] == "true"
+    assert summary["count"] == 1277
+    assert sample is not None
+
+
+def test_fetch_summary_without_a_summary_raises(monkeypatch):
+    # Returning zero here would be a confident wrong answer.
+    _summary_response(monkeypatch, summary=None, items=[_expenditure(1)])
+    with pytest.raises(api.OcpfApiError, match="no summary"):
+        search.fetch_summary({"CpfId": 14902})
+
+
+def test_fetch_summary_accepts_an_in_window_record(monkeypatch):
+    _summary_response(
+        monkeypatch,
+        summary={"count": 1, "total": 1.0},
+        items=[dict(_expenditure(1), date="6/24/2024")],
+    )
+    summary, _ = search.fetch_summary(
+        {"CpfId": 14902}, start=date(2024, 1, 1), end=date(2024, 10, 31)
+    )
+    assert summary["count"] == 1
+
+
+def test_fetch_summary_detects_an_ignored_date_bound(monkeypatch):
+    # The real failure this guards: an ignored StartDate/EndDate returns the
+    # filer's whole history with a plausible, larger total and no error.
+    _summary_response(
+        monkeypatch,
+        summary={"count": 15411, "total": 999999.0},
+        items=[dict(_expenditure(1), date="5/1/2009")],
+    )
+    with pytest.raises(api.OcpfApiError, match="date filter was not applied"):
+        search.fetch_summary(
+            {"CpfId": 14902}, start=date(2024, 1, 1), end=date(2024, 10, 31)
+        )
+
+
+def test_fetch_summary_with_no_records_does_not_raise(monkeypatch):
+    _summary_response(monkeypatch, summary={"count": 0, "total": 0.0}, items=[])
+    summary, sample = search.fetch_summary(
+        {"CpfId": 1}, start=date(2024, 1, 1), end=date(2024, 10, 31)
+    )
+    assert summary["count"] == 0
+    assert sample is None
+
+
+def test_format_api_date_uses_unpadded_month_and_day():
+    assert search.format_api_date(date(2024, 1, 5)) == "1/5/2024"
+    assert search.format_api_date(date(2024, 10, 31)) == "10/31/2024"
+
+
+def test_fetch_category_total_sends_the_category_constant(monkeypatch):
+    calls: list = []
+    _summary_response(
+        monkeypatch,
+        summary={"count": 845, "total": 397182.30},
+        items=[dict(_expenditure(1), date="3/1/2024")],
+        calls=calls,
+    )
+
+    count, total = search.fetch_category_total(
+        14902, search.CATEGORY_EXPENDITURES, date(2023, 11, 1), date(2024, 10, 25)
+    )
+
+    assert (count, total) == (845, 397182.30)
+    assert calls[0]["SearchTypeCategory"] == "B"
+    assert calls[0]["StartDate"] == "11/1/2023"
+    assert calls[0]["EndDate"] == "10/25/2024"
+
+
+def test_fetch_category_total_rejects_an_unknown_category(monkeypatch):
+    def fake(path, params=None, **kwargs):
+        raise AssertionError("should not have issued a request")
+
+    monkeypatch.setattr(api, "get_json", fake)
+    with pytest.raises(ValueError, match="unknown search category"):
+        search.fetch_category_total(14902, "E", date(2024, 1, 1), date(2024, 12, 31))
+
+
+def test_fetch_category_total_rejects_receipts_for_an_expenditure_query(monkeypatch):
+    _summary_response(
+        monkeypatch,
+        summary={"count": 5, "total": 100.0},
+        items=[{"contributorCpfId": 1, "fullNameReverse": "Doe, Jane", "date": "3/1/2024"}],
+    )
+    with pytest.raises(api.OcpfApiError, match="money received as money spent"):
+        search.fetch_category_total(
+            14902, search.CATEGORY_EXPENDITURES, date(2024, 1, 1), date(2024, 12, 31)
+        )
+
+
+def test_fetch_category_total_parses_a_display_string_total(monkeypatch):
+    _summary_response(
+        monkeypatch,
+        summary={"count": 2, "total": "$1,234.56"},
+        items=[dict(_expenditure(1), date="3/1/2024")],
+    )
+    count, total = search.fetch_category_total(
+        14902, search.CATEGORY_RECEIPTS, date(2024, 1, 1), date(2024, 12, 31)
+    )
+    assert (count, total) == (2, 1234.56)
