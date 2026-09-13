@@ -175,6 +175,60 @@ Three things to know about the underlying data:
   correct: item search includes out-of-pocket candidate expenditures that the
   YTD bank figure excludes.
 
+### `ocpf totals` — money in a window, not a calendar year
+
+```bash
+ocpf totals <filer> --start <date> --end <date> [--category receipts|expenditures]
+                    [--resolve-year <year>] [--json]
+```
+
+`ocpf race` and `ocpf filer` report the year-to-date figure OCPF publishes. That
+figure is a **full calendar year**, so once a cycle is over it includes money
+raised *after* the election — and post-election money follows the outcome, since
+winners keep raising and losers stop. For cpfId 14902:
+
+| Year | Through 10/31 | Full calendar year | Raised after 10/31 |
+|---|---|---|---|
+| 2024 | $401,190.59 | $560,090.46 | 28% |
+| 2020 | $32,935.00 | $111,125.63 | 70% |
+
+Any analysis that treats the published number as pre-election money is wrong by
+that much, in the direction that flatters the result. `ocpf totals` measures an
+explicit window instead:
+
+```console
+$ ocpf totals 14902 --start 2024-01-01 --end 2024-10-31
+cpfId     14902
+Category  receipts
+Window    2024-01-01 to 2024-10-31
+Records   1,277
+Total     $401,190.59
+
+$ ocpf totals 14902 --start 2023-11-01 --end 2024-10-25 --category expenditures
+cpfId     14902
+Category  expenditures
+Window    2023-11-01 to 2024-10-25
+Records   845
+Total     $397,182.30
+```
+
+Notes:
+
+- **Both bounds are required**, and the window is printed with the figure. An
+  unbounded total is the ambiguous number this command exists to replace, so it
+  cannot be produced by leaving an option off.
+- **Windows may cross a year boundary**, which matters for an election held
+  early in a calendar year, and coverage reaches back to at least 2010.
+- **One request per invocation.** The total is the API's own arithmetic over the
+  filtered set, not a sum of records fetched locally — which is why the command
+  verifies the date filter was actually applied before reporting anything.
+- **An empty window is a finding, not an error**: zero records reports `$0.00`
+  and exits zero.
+- The total will not match `ocpf filer`'s year-to-date figure even for a
+  full-year window, for the same reason `ocpf expenditures` does not: item
+  search includes out-of-pocket candidate expenditures that the year-to-date
+  bank figure excludes.
+
 ### `ocpf reports` / `ocpf report` — the filings themselves
 
 ```bash
