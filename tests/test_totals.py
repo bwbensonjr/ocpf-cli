@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date
 
 import pytest
@@ -13,6 +14,17 @@ from ocpf_cli.cli import app
 from ocpf_cli.commands import totals as cmd
 
 runner = CliRunner()
+
+# Typer renders its own errors through rich, and rich styles the option name
+# when it detects a CI terminal — under GitHub Actions `--end` comes back as
+# `--` and `end` separated by escape codes, so a raw substring check passes
+# locally and fails in CI. Assert against the plain text instead.
+ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def plain(result) -> str:
+    """`result.output` with terminal styling removed."""
+    return ANSI.sub("", result.output)
 
 
 def _install(monkeypatch, *, count=1277, total=401190.59, calls=None, cpf_id=14902):
@@ -85,7 +97,7 @@ def test_missing_end_bound_exits_non_zero(monkeypatch):
     _no_request(monkeypatch)
     result = runner.invoke(app, ["totals", "14902", "--start", "2024-01-01"])
     assert result.exit_code != 0
-    assert "--end" in result.output
+    assert "--end" in plain(result)
 
 
 def test_missing_both_bounds_exits_non_zero(monkeypatch):
@@ -98,14 +110,14 @@ def test_unparseable_date_exits_non_zero_without_a_request(monkeypatch):
     _no_request(monkeypatch)
     result = runner.invoke(app, ["totals", "14902", "--start", "notadate", "--end", "2024-10-31"])
     assert result.exit_code == 1
-    assert "--start" in result.output
+    assert "--start" in plain(result)
 
 
 def test_inverted_window_is_rejected_without_a_request(monkeypatch):
     _no_request(monkeypatch)
     result = runner.invoke(app, ["totals", "14902", "--start", "2024-12-31", "--end", "2024-01-01"])
     assert result.exit_code == 1
-    assert "inverted" in result.output
+    assert "inverted" in plain(result)
 
 
 # --- category safety ---
@@ -139,7 +151,7 @@ def test_unknown_category_is_rejected_before_any_request(monkeypatch):
          "--category", "bogus"],
     )
     assert result.exit_code != 0
-    assert "receipts" in result.output
+    assert "receipts" in plain(result)
 
 
 def test_the_user_string_never_reaches_the_api_parameter():
@@ -162,7 +174,7 @@ def test_api_error_exits_non_zero(monkeypatch):
     monkeypatch.setattr(search, "fetch_category_total", boom)
     result = runner.invoke(app, ["totals", "14902", "--start", "2024-01-01", "--end", "2024-10-31"])
     assert result.exit_code == 1
-    assert "date filter was not applied" in result.output
+    assert "date filter was not applied" in plain(result)
 
 
 def test_unresolvable_filer_exits_non_zero(monkeypatch):
