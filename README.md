@@ -56,6 +56,21 @@ ocpf race <district> [--year <year>] [--special] [--stage primary|general] [--js
   code) because no year-scoped district list exists. Progress goes to stderr;
   expect roughly 20-30 seconds. Current districts and 2020-onward years are
   unaffected and cost nothing extra.
+- A district that held a **special election** is resolved from the filings
+  instead, and skips that sweep entirely. This covers the pre-2020 odd years
+  (2007, 2013, 2015, 2017, 2019) where no district list has data at all — the
+  years specials happen. Such a district may render **without a code**:
+
+  ```
+  District:  Senate, 1st Hampden & Hampshire
+  ```
+
+  That is not a missing value to work around. OCPF numbers a district only in
+  sources that stop before these years, and a seat's number is recovered from the
+  candidates who sought it — so when every one of them has since run for
+  something else, the name is known and the number is not. `--json` reports
+  `"districtCode": null` for these, and the district resolves and reports
+  normally in every other respect.
 - `--special` summarizes a **special election** held that year instead of the
   regular cycle. See below.
 - `--json` emits the merged, filtered candidate records (including the
