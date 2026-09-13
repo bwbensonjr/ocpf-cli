@@ -7,8 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-09-13
+
+Three more fixes to historical district resolution, all of the same kind: a
+question about a past year was being answered from a source that has no year, or
+not answered at all because a name was thrown away before it could be matched.
+
 ### Fixed
 
+- **Districts whose names contain commas are no longer dropped.** Every
+  multi-county district — `Worcester, Hampden, Hampshire & Franklin`,
+  `Middlesex, Suffolk & Essex`, `Berkshire, Hampshire & Franklin` — failed to
+  resolve from the report log, reporting no match while the answer sat in the
+  data. The office/district splitter assumed the first comma separated the two,
+  which is the legislative feed's shape (`"Senate, Worcester & Norfolk"`) but not
+  the log's (`"Senate Worcester, Hampden, Hampshire & Franklin"`), where the
+  commas belong to the district name; those rows parsed as the office
+  `"Senate Worcester"` and were discarded as non-legislative. The leading word
+  now decides, falling back to the comma split only when it is not already an
+  office. This recovers 98 log rows — legislative rows parsed rise from 1,008 to
+  1,106, restoring every filing for `Middlesex, Suffolk & Essex` and
+  `Norfolk, Bristol & Middlesex`, two seats that had never been resolvable from
+  the log at all — and makes
+  `ocpf race "Worcester, Hampden, Hampshire and Franklin" --year 2010` resolve to
+  code 137. Single-county names, which have no comma, were never affected.
 - **A retired district whose name prefixes current ones is reachable again.**
   `Plymouth and Norfolk` was a Senate seat through the 2011 cycle; the 2021 map
   split it into `1st Plymouth and Norfolk` and `2nd Plymouth and Norfolk`. Asking
@@ -26,21 +48,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   2020 on. Codes are now validated against the requested year's map, reading the
   same sources in the same order as the name path. This also reopens the only way
   to disambiguate a name by hand.
-
-- **Districts whose names contain commas are no longer dropped.** Every
-  multi-county district — `Worcester, Hampden, Hampshire & Franklin`,
-  `Middlesex, Suffolk & Essex`, `Berkshire, Hampshire & Franklin` — failed to
-  resolve from the report log, reporting no match while the answer sat in the
-  data. The office/district splitter assumed the first comma separated the two,
-  which is the legislative feed's shape (`"Senate, Worcester & Norfolk"`) but not
-  the log's (`"Senate Worcester, Hampden, Hampshire & Franklin"`), where the
-  commas belong to the district name; those rows parsed as the office
-  `"Senate Worcester"` and were discarded as non-legislative. The leading word
-  now decides, falling back to the comma split only when it is not already an
-  office. This restores 98 of 1,106 legislative special-election log rows and
-  makes `ocpf race "Worcester, Hampden, Hampshire and Franklin" --year 2010`
-  resolve to code 137. Single-county names, which have no comma, were never
-  affected and are unchanged.
 
 ## [0.4.1] - 2026-09-13
 
@@ -220,7 +227,8 @@ installable and runnable with `uvx ocpf`, `pipx install ocpf`, or
 - Automated, test-gated release to PyPI via GitHub Actions using Trusted
   Publishing (OIDC), with CI running the test suite on Python 3.11–3.13.
 
-[Unreleased]: https://github.com/bwbensonjr/ocpf-cli/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/bwbensonjr/ocpf-cli/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/bwbensonjr/ocpf-cli/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/bwbensonjr/ocpf-cli/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/bwbensonjr/ocpf-cli/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/bwbensonjr/ocpf-cli/compare/v0.2.0...v0.3.0
