@@ -8,6 +8,7 @@ from ocpf_cli.districts import (
     District,
     DistrictResolutionError,
     resolve_district,
+    _normalize,
 )
 
 # A small fixture set covering the near-collision and the ambiguous prefix.
@@ -58,3 +59,41 @@ def test_no_match_errors_without_candidates():
     with pytest.raises(DistrictResolutionError) as exc:
         resolve_district("Nonexistent County", DISTRICTS)
     assert exc.value.candidates == []
+
+
+# --- ordinal folding ---
+
+
+def test_ordinal_words_fold_to_digits():
+    assert _normalize("First Plymouth & Norfolk") == _normalize("1st Plymouth and Norfolk")
+    assert _normalize("Second Plymouth and Norfolk") == "2nd plymouth and norfolk"
+    assert _normalize("Third Barnstable") == "3rd barnstable"
+
+
+def test_compound_ordinals_fold_in_both_spellings():
+    assert _normalize("Twenty-First Middlesex") == "21st middlesex"
+    assert _normalize("twenty first middlesex") == "21st middlesex"
+    assert _normalize("Thirty-Seventh Middlesex") == "37th middlesex"
+
+
+def test_teen_ordinals_take_a_th_suffix():
+    assert _normalize("Eleventh Suffolk") == "11th suffolk"
+    assert _normalize("Twelfth Essex") == "12th essex"
+    assert _normalize("Twentieth Middlesex") == "20th middlesex"
+
+
+def test_folding_does_not_disturb_word_order():
+    # Order still distinguishes two real districts.
+    assert _normalize("Middlesex & Suffolk") != _normalize("Suffolk and Middlesex")
+
+
+def test_folding_does_not_match_inside_a_word():
+    # No ordinal word is a substring of a county name, but guard the boundary.
+    assert _normalize("Firstbrook") == "firstbrook"
+    assert _normalize("Worcester") == "worcester"
+
+
+def test_ordinal_word_resolves_a_district():
+    # "Second Middlesex" reaches 2nd Middlesex, which the digit form also reaches.
+    assert resolve_district("Second Middlesex", DISTRICTS).code == 116
+    assert resolve_district("2nd Middlesex", DISTRICTS).code == 116

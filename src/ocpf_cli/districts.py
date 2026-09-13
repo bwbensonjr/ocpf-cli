@@ -8,6 +8,7 @@ legislative offices (House and Senate). Ambiguity is never guessed away.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -41,14 +42,71 @@ class DistrictResolutionError(Exception):
         self.candidates = candidates or []
 
 
+def _ordinal_suffix(n: int) -> str:
+    """The English suffix for `n`: 1 -> st, 2 -> nd, 3 -> rd, 11 -> th."""
+    if 10 <= n % 100 <= 20:
+        return "th"
+    return {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+
+
+def _build_ordinal_words() -> dict[str, str]:
+    """Map ordinal words to the digit forms the API uses: `first` -> `1st`.
+
+    Covers 1-40, which spans every numbered House (up to 37th) and Senate
+    district. Compound ordinals are registered in both the hyphenated and the
+    spaced spelling, since sources differ and `_normalize` does not join words.
+    """
+    units = [
+        "first", "second", "third", "fourth", "fifth",
+        "sixth", "seventh", "eighth", "ninth",
+    ]
+    teens = [
+        "tenth", "eleventh", "twelfth", "thirteenth", "fourteenth",
+        "fifteenth", "sixteenth", "seventeenth", "eighteenth", "nineteenth",
+    ]
+    tens_ordinal = {20: "twentieth", 30: "thirtieth", 40: "fortieth"}
+    tens_cardinal = {20: "twenty", 30: "thirty", 40: "forty"}
+
+    words: dict[str, str] = {}
+    for i, word in enumerate(units, start=1):
+        words[word] = f"{i}{_ordinal_suffix(i)}"
+    for i, word in enumerate(teens, start=10):
+        words[word] = f"{i}{_ordinal_suffix(i)}"
+    for base, word in tens_ordinal.items():
+        words[word] = f"{base}{_ordinal_suffix(base)}"
+    for base, prefix in tens_cardinal.items():
+        for i, unit in enumerate(units, start=1):
+            value = base + i
+            if value > 40:
+                continue
+            digits = f"{value}{_ordinal_suffix(value)}"
+            words[f"{prefix}-{unit}"] = digits
+            words[f"{prefix} {unit}"] = digits
+    return words
+
+
+ORDINAL_WORDS = _build_ordinal_words()
+
+# Longest first, so `twenty-first` is consumed before `first` can match inside
+# it. Word boundaries keep `first` from matching inside an unrelated word.
+_ORDINAL_RE = re.compile(
+    r"\b(" + "|".join(re.escape(w) for w in sorted(ORDINAL_WORDS, key=len, reverse=True)) + r")\b"
+)
+
+
 def _normalize(text: str) -> str:
-    """Lowercase, collapse whitespace, and treat `&` and `and` alike.
+    """Lowercase, collapse whitespace, treat `&` and `and` alike, fold ordinals.
 
     So `"Suffolk and Middlesex"` and `"Suffolk & Middlesex"` normalize to the
     same string, while `"Middlesex & Suffolk"` stays distinct (order matters).
+
+    Ordinal words fold to the digit forms the API writes: `"First Plymouth &
+    Norfolk"` and `"1st Plymouth and Norfolk"` normalize alike. The fold is
+    one-directional because OCPF always writes digits, so digits are canonical.
     """
     lowered = text.lower().replace("&", " and ")
-    return " ".join(lowered.split())
+    collapsed = " ".join(lowered.split())
+    return _ORDINAL_RE.sub(lambda m: ORDINAL_WORDS[m.group(0)], collapsed)
 
 
 def fetch_legislative_districts() -> list[District]:
