@@ -33,9 +33,21 @@ The endpoint landscape is mapped in
 drove this design:
 
 - The obvious "candidates in a district" endpoints —
-  `onballot/candidates/{year}/{code}` and `onballot/finsummaries/...` — are
-  **stale** (data stops ~2012) and return empty for current cycles. Do not use
-  them for current races.
+  `onballot/candidates/{year}/{code}` and `onballot/finsummaries/{year}/{code}` —
+  **return empty for current cycles**, so do not use them for current races. They
+  are not, however, stale past 2012: both carry data through **2018**, and their
+  real shape is a two-part gap. Measured on `finsummaries` across Senate codes
+  105-145 (`candidates` spot-checked on six of them and matching):
+  - **Nothing from 2020 on.** 2020, 2022 and 2024 return zero rows.
+  - **Nothing in most odd years.** 2007, 2013, 2015, 2017 and 2019 return zero
+    rows across that range; 2011 is the exception and is populated (100 rows).
+    2005 was checked on a six-code sample only.
+
+  Populated years are therefore 2004, 2006, 2008, 2010, 2011, 2012, 2014, 2016
+  and 2018. This is why `ocpf race`'s historical fallback works for an even year
+  and why district resolution tier 3 (which sweeps `finsummaries` for populated
+  codes) cannot resolve a renamed district in a pre-2020 **odd** year — the years
+  special elections cluster in. See issue #9.
 - The working source of the current legislative field with YTD money is
   `reports/legislative/depository/ytd/{year}`, which returns
   `{ reports: [...], summary: {...} }`. Each report row carries `cpfId`,
@@ -67,7 +79,8 @@ drove this design:
     handle on a pre-2020 retired district, reached by sweeping
     `onballot/finsummaries/{year}/{code}` for populated codes (those rows carry
     `districtCode: 0` and no district name, so the code is known only from the
-    URL and the name only from the filers).
+    URL and the name only from the filers). This tier only answers for a year
+    `finsummaries` actually covers; see the coverage gap above.
 - `filingSchedules/{year}` provides `primaryElectionDate` and
   `generalElectionDate` (timeline context only — money is never split by
   election).
