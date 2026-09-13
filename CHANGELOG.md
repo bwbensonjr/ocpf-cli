@@ -7,19 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-09-13
+
+A fix to historical district resolution. Districts retired at redistricting were
+reachable only for the years one of their former candidates happened never to run
+again — an accident of who stayed put, not a property of the data.
+
 ### Fixed
 
 - **Retired districts now resolve for every year they were contested, not only
-  the years a candidate stayed put.** `ocpf race "1st Plymouth and Bristol"`
-  worked for 2010 and 2011 but failed for 2012, 2014, 2016 and 2018 as though
-  the seat had never existed, though OCPF returns its candidates for all six
-  years. Two causes: the historical code sweep started at Senate 105 and so
-  never probed code 104, and where it did reach a code it could only name it by
-  asking each candidate what office they seek *now* — which answers nothing once
-  they have all moved on to other seats. The sweep now covers the retired codes
-  below the current map's floor, and where a seat's former candidates can no
-  longer name it, the name is read from what their filings for that year called
-  it. Lookups that already worked make no additional requests.
+  the years a candidate stayed put.**
+  `ocpf race "1st Plymouth and Bristol"` worked for 2010 and 2011 but failed for
+  2012, 2014, 2016 and 2018 as though the seat had never existed, though OCPF
+  returns its candidates for all six. Two independent causes, either one fatal:
+
+  The historical code sweep ran the Senate from code 105, a range widened above
+  the current map's ceiling but not below its floor, so retired code 104 was
+  never probed. It now covers the retired codes below that floor.
+
+  Where the sweep did reach a code, it could only name it by asking each
+  candidate what office they seek *now* — which answers nothing once they have
+  all moved on to other seats, as every candidate for this one had by 2012. The
+  district code was never in doubt in those years; only its name was. Where a
+  seat's former candidates can no longer name it, the name is now read from what
+  their filings for that year called it, which is era-correct where their current
+  office is not.
+
+  Lookups that already resolved make no additional request, and return
+  byte-identical output.
 
 ## [0.4.0] - 2026-09-13
 
@@ -170,7 +185,8 @@ installable and runnable with `uvx ocpf`, `pipx install ocpf`, or
 - Automated, test-gated release to PyPI via GitHub Actions using Trusted
   Publishing (OIDC), with CI running the test suite on Python 3.11–3.13.
 
-[Unreleased]: https://github.com/bwbensonjr/ocpf-cli/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/bwbensonjr/ocpf-cli/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/bwbensonjr/ocpf-cli/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/bwbensonjr/ocpf-cli/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/bwbensonjr/ocpf-cli/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/bwbensonjr/ocpf-cli/compare/v0.1.0...v0.2.0
