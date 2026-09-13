@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Districts whose names contain commas are no longer dropped.** Every
+  multi-county district — `Worcester, Hampden, Hampshire & Franklin`,
+  `Middlesex, Suffolk & Essex`, `Berkshire, Hampshire & Franklin` — failed to
+  resolve from the report log, reporting no match while the answer sat in the
+  data. The office/district splitter assumed the first comma separated the two,
+  which is the legislative feed's shape (`"Senate, Worcester & Norfolk"`) but not
+  the log's (`"Senate Worcester, Hampden, Hampshire & Franklin"`), where the
+  commas belong to the district name; those rows parsed as the office
+  `"Senate Worcester"` and were discarded as non-legislative. The leading word
+  now decides, falling back to the comma split only when it is not already an
+  office. This restores 98 of 1,106 legislative special-election log rows and
+  makes `ocpf race "Worcester, Hampden, Hampshire and Franklin" --year 2010`
+  resolve to code 137. Single-county names, which have no comma, were never
+  affected and are unchanged.
+
 ## [0.4.1] - 2026-09-13
 
 A fix to historical district resolution. Districts retired at redistricting were

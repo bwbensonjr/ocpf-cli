@@ -172,6 +172,46 @@ def test_parse_office_sought_without_a_comma():
     )
 
 
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        # The report log's shape: office then district, space-separated, with
+        # the commas belonging to the DISTRICT NAME. Splitting on the first
+        # comma read these as office "Senate Worcester" and dropped them --
+        # every multi-county district, on both the finsummaries naming path and
+        # the special-election tier (98 of 1,106 legislative log rows).
+        (
+            "Senate Worcester, Hampden, Hampshire & Franklin",
+            ("Senate", "Worcester, Hampden, Hampshire & Franklin"),
+        ),
+        (
+            "Senate Berkshire, Hampshire & Franklin",
+            ("Senate", "Berkshire, Hampshire & Franklin"),
+        ),
+        ("Senate Middlesex, Suffolk & Essex", ("Senate", "Middlesex, Suffolk & Essex")),
+        ("Senate Norfolk, Bristol & Middlesex", ("Senate", "Norfolk, Bristol & Middlesex")),
+        # The feed's shape, with a comma-bearing name, still parses.
+        (
+            "Senate, Worcester, Hampden, Hampshire & Middlesex",
+            ("Senate", "Worcester, Hampden, Hampshire & Middlesex"),
+        ),
+        # Single-county names in both shapes -- the cases that always worked.
+        ("Senate 1st Plymouth & Bristol", ("Senate", "1st Plymouth & Bristol")),
+        ("Senate, Worcester & Norfolk", ("Senate", "Worcester & Norfolk")),
+    ],
+)
+def test_parse_office_sought_keeps_commas_inside_district_names(text, expected):
+    assert districts._parse_office_sought(text) == expected
+
+
+def test_parse_office_sought_still_rejects_non_legislative_multi_word():
+    # The leading-word branch must not accept a non-legislative office just
+    # because the string has no comma to fall back on.
+    assert districts._parse_office_sought("Mayoral Westfield") is None
+    assert districts._parse_office_sought("Governor's Council, 1st District") is None
+    assert districts._parse_office_sought("   ") is None
+
+
 def test_parse_office_sought_rejects_non_legislative_and_empty():
     assert districts._parse_office_sought("Mayoral, Boston") is None
     assert districts._parse_office_sought("Senate") is None

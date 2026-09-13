@@ -204,17 +204,33 @@ OFFICE_CODE_RANGES = {
 def _parse_office_sought(text: str) -> tuple[str, str] | None:
     """Split an `officeSought` string into (office, description).
 
-    The feed writes `"Senate, Worcester & Norfolk"`; other endpoints write the
-    same thing without a comma (`"House 28th Middlesex"`). Returns None when the
+    Two source spellings, and the separator alone cannot tell them apart. The
+    legislative feed writes `"Senate, Worcester & Norfolk"`; the report log
+    writes `"Senate Worcester, Hampden, Hampshire & Franklin"`. Splitting on the
+    first comma reads the log's multi-county names as
+    office `"Senate Worcester"` -- not a legislative office, so the row is
+    dropped. Every district whose name contains a comma was lost that way, which
+    went unnoticed because single-county names like `"1st Plymouth & Bristol"`
+    have none.
+
+    So the leading word decides: if it is already an office, the rest is the
+    district however it is punctuated. Only when it is not do we fall back to
+    splitting on the comma, which is the feed's shape. Returns None when the
     office is not legislative.
     """
     cleaned = " ".join((text or "").split())
     if not cleaned:
         return None
+
+    head, _, rest = cleaned.partition(" ")
+    if head in LEGISLATIVE_OFFICES and rest.strip():
+        # `"Senate Worcester, Hampden, Hampshire & Franklin"` -- the commas
+        # belong to the district name, not to the office/district split.
+        return head, rest.strip()
+
     office, sep, description = cleaned.partition(",")
     if not sep:
-        # No comma: the office is the leading word, the rest is the district.
-        office, _, description = cleaned.partition(" ")
+        return None
     office = office.strip()
     description = description.strip()
     if office not in LEGISLATIVE_OFFICES or not description:
