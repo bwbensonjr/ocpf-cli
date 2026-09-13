@@ -203,7 +203,7 @@ def race(
         year = date.today().year
 
     try:
-        resolved = resolve_district(district)
+        resolved = resolve_district(district, year)
     except DistrictResolutionError as exc:
         render.error(str(exc))
         for cand in exc.candidates:
