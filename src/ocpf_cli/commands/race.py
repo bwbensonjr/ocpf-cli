@@ -1,8 +1,18 @@
-"""`ocpf race` — YTD financial summary for a legislative district's candidates.
+"""`ocpf race` — financial summary for a legislative district's candidates.
 
-Pipeline: resolve the district -> fetch and merge the depository + non-depository
-legislative feeds -> filter to the district -> add timeline context (election
-dates, as-of date) -> render a table (or JSON).
+Regular cycle (the default): resolve the district -> fetch and merge the
+depository + non-depository legislative feeds -> filter to the district -> add
+timeline context (election dates, as-of date) -> render a table (or JSON).
+
+Special elections (`--special`): the feeds above carry none, so the roster comes
+from the filings instead. Resolve the district -> sweep `reports/log` for the
+special report types -> keep the rows whose office and reporting-period year
+match -> pick the stage -> read each candidate's money from their *operative*
+filing, never from the sweep rows -> render.
+
+The two paths are separate on purpose. `--special` branches before the
+legislative-feed fetch, so the regular path runs the code and issues the
+requests it did before this option existed.
 """
 
 from __future__ import annotations
@@ -12,8 +22,15 @@ from typing import Any
 
 import typer
 
-from .. import api, render
-from ..districts import DistrictResolutionError, District, resolve_district
+from .. import api, render, reports
+from ..districts import (
+    DistrictResolutionError,
+    District,
+    _normalize,
+    _parse_office_sought,
+    resolve_district,
+)
+from ..reports import ReportingPeriod, SpecialReportRow, SpecialStage
 from ..legislative import (
     DEPOSITORY_PATH,
     NON_DEPOSITORY_PATH,
@@ -184,6 +201,281 @@ def _render_table(
         )
 
 
+# --------------------------------------------------------------------------
+# Special elections
+# --------------------------------------------------------------------------
+
+# What a candidate's money reads as when they filed nothing operative for the
+# stage. Distinct from "$0.00", which would assert they raised nothing.
+NOT_REPORTED = "not reported"
+
+
+@dataclass(frozen=True)
+class SpecialCandidate:
+    """One candidate on a special-election roster, with their filed money.
+
+    `report` is the operative filing the figures came from, or None when the
+    candidate filed nothing for this stage — the case `NOT_REPORTED` renders.
+    """
+
+    cpf_id: int
+    name: str
+    report: dict | None
+
+    @property
+    def receipts(self) -> float | None:
+        return None if self.report is None else self.report.get("receiptTotalValue")
+
+    @property
+    def expenditures(self) -> float | None:
+        return None if self.report is None else self.report.get("expenditureTotalValue")
+
+
+class SpecialRaceError(Exception):
+    """No usable special election for the request.
+
+    Separate from `OcpfApiError` so the command can tell "this district held no
+    such special election" — a statement about the data — from an outage.
+    """
+
+
+def _rows_for_district(district: District, year: int, stage: SpecialStage) -> list[SpecialReportRow]:
+    """Sweep rows for one stage that belong to `district` in `year`.
+
+    Matching is on the exact normalized district description, never a substring:
+    `"1st Suffolk"` is a substring of `"21st Suffolk"`, so a substring match
+    would silently merge two districts' rosters. `_normalize` folds the `&`/`and`
+    and ordinal-word differences between how a user types a district and how the
+    log writes it.
+
+    The year comes from the end of the reporting period, which is days before
+    the election the filing is about — so a window straddling New Year belongs to
+    the year its election falls in.
+    """
+    target = _normalize(district.description)
+    matched = []
+    for row in reports.fetch_special_reports(stage):
+        parsed = _parse_office_sought(row.office_sought)
+        if parsed is None:
+            # Not a House or Senate seat: the sweep also carries municipal,
+            # mayoral and Governor's Council specials.
+            continue
+        office, description = parsed
+        if office != district.office or _normalize(description) != target:
+            continue
+        if row.period is None or row.period.end.year != year:
+            continue
+        matched.append(row)
+    return matched
+
+
+def _span(periods: list[ReportingPeriod]) -> ReportingPeriod:
+    """The envelope of `periods` — earliest start to latest end.
+
+    Candidates in one special election routinely file different windows for it:
+    across the whole log, 43 of 65 district-years hold more than one distinct
+    pre-primary window, and every one of those resolves to a single election
+    once overlapping windows are merged. A depository filer's window and a
+    non-depository filer's simply start on different days. So differing windows
+    are spanned, not treated as rival elections.
+    """
+    return ReportingPeriod(
+        start=min(period.start for period in periods),
+        end=max(period.end for period in periods),
+    )
+
+
+def _candidate_period(candidate: SpecialCandidate) -> ReportingPeriod | None:
+    """The window a candidate's operative filing actually covers."""
+    if candidate.report is None:
+        return None
+    start = candidate.report.get("startDateValue")
+    end = candidate.report.get("endDateValue")
+    if start is None or end is None:
+        return None
+    return ReportingPeriod(start=start, end=end)
+
+
+def _select_stage(
+    district: District,
+    year: int,
+    requested: SpecialStage | None,
+) -> tuple[SpecialStage, list[SpecialReportRow]]:
+    """Pick the stage to summarize, and return its rows.
+
+    With no `--stage`, the general wins when both were held: a special's two
+    stages are two filing windows of one contest, not two elections, and the
+    general is the contest. The primary stays one flag away and is named on
+    stderr so the narrower view is never invisible.
+    """
+    held = {
+        stage: rows
+        for stage in SpecialStage
+        if (rows := _rows_for_district(district, year, stage))
+    }
+
+    if not held:
+        raise SpecialRaceError(
+            f"No special election found for {district.label} (code "
+            f"{district.code}) in {year}"
+        )
+
+    if requested is not None:
+        if requested not in held:
+            was = ", ".join(stage.value for stage in held)
+            raise SpecialRaceError(
+                f"No special {requested.value} found for {district.label} in "
+                f"{year}; the special {was} was held that year"
+            )
+        return requested, held[requested]
+
+    stage = SpecialStage.GENERAL if SpecialStage.GENERAL in held else SpecialStage.PRIMARY
+    if stage is SpecialStage.GENERAL and SpecialStage.PRIMARY in held:
+        primary_period = _span([row.period for row in held[SpecialStage.PRIMARY]])
+        render.status(
+            f"note: a special primary was also held ({primary_period.label}); "
+            f"see it with --stage primary"
+        )
+    return stage, held[stage]
+
+
+def build_special_roster(
+    district: District,
+    year: int,
+    stage: SpecialStage,
+    rows: list[SpecialReportRow],
+) -> list[SpecialCandidate]:
+    """Resolve each filer in `rows` to their operative filing for the stage.
+
+    The sweep rows carry money, and it is unusable: the log returns every
+    amendment generation, so a row's total identifies a version rather than a
+    candidate. `fetch_reports` defaults to `OnlyCurrent=true` and returns the
+    surviving version with the amended figures, which is what this reads.
+    """
+    by_cpf_id: dict[int, str] = {}
+    for row in rows:
+        by_cpf_id.setdefault(row.cpf_id, row.name)
+
+    plural = "" if len(by_cpf_id) == 1 else "s"
+    render.status(
+        f"Reading filings for {len(by_cpf_id)} candidate{plural} in "
+        f"{district.label}, {year}..."
+    )
+    roster = []
+    for cpf_id, name in by_cpf_id.items():
+        report = reports.find_stage_report(reports.fetch_reports(cpf_id), stage, year)
+        roster.append(SpecialCandidate(cpf_id=cpf_id, name=name, report=report))
+    return roster
+
+
+def _special_sort_key(candidate: SpecialCandidate) -> Any:
+    # Receipts descending, as the regular table orders. A candidate who filed
+    # nothing sorts last rather than as a zero-raiser.
+    return (candidate.receipts is None, -(candidate.receipts or 0), candidate.name)
+
+
+def _render_special_table(
+    district: District,
+    stage: SpecialStage,
+    period: ReportingPeriod,
+    roster: list[SpecialCandidate],
+) -> None:
+    """Print the special-election header and table to stdout.
+
+    The header names the filing period and no election date: OCPF publishes none
+    for a special (`filingSchedules/2013` returns empty strings for both), and a
+    date derived from the filing window would be a guess shown as a fact.
+    """
+    windows = {p for p in (_candidate_period(c) for c in roster) if p is not None}
+    print(f"District:  {district.label} (code {district.code})")
+    print(f"Election:  special {stage.value}")
+    if len(windows) > 1:
+        print(f"Period:    {period.label} (candidates' filing windows differ)")
+    else:
+        print(f"Period:    {period.label}")
+    print()
+
+    table_rows = [
+        [
+            candidate.name,
+            NOT_REPORTED if candidate.report is None
+            else render.format_currency(candidate.receipts),
+            NOT_REPORTED if candidate.report is None
+            else render.format_currency(candidate.expenditures),
+        ]
+        for candidate in sorted(roster, key=_special_sort_key)
+    ]
+    headers = ["Candidate", "Raised in Period", "Spent in Period"]
+    print(render.render_table(table_rows, headers, right_align=[1, 2]))
+    print()
+    print(
+        "Figures are each candidate's operative filing for the period above, "
+        "not year-to-date."
+    )
+    print("OCPF publishes no election date for a special election.")
+    if any(candidate.report is None for candidate in roster):
+        print(f"{NOT_REPORTED} = the candidate filed no report for this stage.")
+
+
+def _period_json(period: ReportingPeriod | None) -> dict | None:
+    if period is None:
+        return None
+    return {
+        "start": period.start.isoformat(),
+        "end": period.end.isoformat(),
+        "label": period.label,
+    }
+
+
+def _special_json(
+    district: District,
+    stage: SpecialStage,
+    period: ReportingPeriod,
+    roster: list[SpecialCandidate],
+) -> list[dict]:
+    """One self-contained record per candidate, numbers as numbers."""
+    return [
+        {
+            "cpfId": candidate.cpf_id,
+            "name": candidate.name,
+            "districtCode": district.code,
+            "office": district.office,
+            "districtDescription": district.description,
+            "stage": stage.value,
+            # The window this candidate's own filing covers, which is what
+            # their figures are the total of. `span` is the whole race's.
+            "reportingPeriod": _period_json(_candidate_period(candidate)),
+            "reportingPeriodSpan": _period_json(period),
+            "reportId": None if candidate.report is None else candidate.report.get("reportId"),
+            "receipts": candidate.receipts,
+            "expenditures": candidate.expenditures,
+        }
+        for candidate in sorted(roster, key=_special_sort_key)
+    ]
+
+
+def run_special(
+    district: District,
+    year: int,
+    requested_stage: SpecialStage | None,
+    json_output: bool,
+) -> None:
+    """The `--special` path: roster from the sweep, money from the filings."""
+    stage, rows = _select_stage(district, year, requested_stage)
+    roster = build_special_roster(district, year, stage, rows)
+
+    # The period shown comes from the filings the figures came from, so the
+    # header describes exactly the money in the table. Only when nobody filed
+    # does it fall back to the windows the sweep advertised.
+    windows = [p for p in (_candidate_period(c) for c in roster) if p is not None]
+    period = _span(windows or [row.period for row in rows])
+
+    if json_output:
+        render.emit_json(_special_json(district, stage, period, roster))
+    else:
+        _render_special_table(district, stage, period, roster)
+
+
 def race(
     district: str = typer.Argument(
         ..., help="District name (e.g. 'Suffolk and Middlesex') or numeric code"
@@ -194,8 +486,22 @@ def race(
     json_output: bool = typer.Option(
         False, "--json", help="Emit merged candidate records as JSON"
     ),
+    special: bool = typer.Option(
+        False,
+        "--special",
+        help="Summarize a special election held in the year, not the regular cycle",
+    ),
+    stage: SpecialStage = typer.Option(
+        None,
+        "--stage",
+        help="Which stage of the special election (default: the general)",
+    ),
 ) -> None:
-    """Year-to-date financial summary of the candidates in a legislative district."""
+    """Financial summary of the candidates in a legislative district.
+
+    Year-to-date for the regular cycle; with `--special`, the filing-period
+    totals for a special election held that year.
+    """
     if year is None:
         # Avoid importing datetime at module load; current year is a runtime fact.
         from datetime import date
@@ -212,6 +518,23 @@ def race(
     except api.OcpfApiError as exc:
         render.error(str(exc))
         raise typer.Exit(code=1)
+
+    if stage is not None and not special:
+        render.error("--stage applies only to --special")
+        raise typer.Exit(code=1)
+
+    if special:
+        # Branches before the legislative-feed fetch, so the regular path below
+        # issues exactly the requests it issued before this option existed.
+        try:
+            run_special(resolved, year, stage, json_output)
+        except SpecialRaceError as exc:
+            render.error(str(exc))
+            raise typer.Exit(code=1)
+        except api.OcpfApiError as exc:
+            render.error(str(exc))
+            raise typer.Exit(code=1)
+        return
 
     try:
         merged = fetch_merged_field(year)
@@ -230,7 +553,8 @@ def race(
         if not matched:
             render.error(
                 f"No candidates found for {resolved.label} (code "
-                f"{resolved.code}) in {year}"
+                f"{resolved.code}) in {year}; if a special election was held "
+                f"that year, reach it with --special"
             )
             raise typer.Exit(code=1)
         timeline = build_timeline(year, matched)
