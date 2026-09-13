@@ -186,11 +186,17 @@ FIRST_FEED_YEAR = 2020
 
 # Code ranges to sweep in tier 3. Wider than the current map (Senate 105-170,
 # House 201-364) because retired codes fall outside it — Senate 140 is within
-# range here but absent from the reference entirely.
+# range here but absent from the reference entirely, and Senate 104 (1st
+# Plymouth & Bristol through the 2020 cycle) falls *below* its floor. A range
+# widened only at the top misses that one: 104 is populated in every year
+# `finsummaries` covers, so a pre-2021 query for that seat failed the sweep
+# without ever probing it. Nothing below 104 or between 171 and 200 is
+# populated, and nothing at 365+, so the floors and ceilings here are measured,
+# not padded.
 OFFICE_CODE_RANGES = {
     # Senate first: less than half the probes, and retired-district queries skew
     # Senate (every 2011-cycle district that fails a current-map lookup is one).
-    "Senate": range(105, 181),
+    "Senate": range(104, 181),
     "House": range(201, 365),
 }
 
@@ -260,11 +266,15 @@ def _district_for_code(year: int, code: int) -> District | None:
     except api.OcpfApiError:
         return None
 
+    cpf_ids = [row.get("cpfId") for row in rows if row.get("cpfId")]
+    if not cpf_ids:
+        # No roster means no evidence this code was contested that year. Return
+        # before the fallback below, which must not cost a request on the empty
+        # codes that make up most of the swept range.
+        return None
+
     tally: dict[tuple[str, str], int] = {}
-    for row in rows:
-        cpf_id = row.get("cpfId")
-        if not cpf_id:
-            continue
+    for cpf_id in cpf_ids:
         try:
             payload = api.get_json(f"filer/{cpf_id}")
         except api.OcpfApiError:
@@ -278,6 +288,51 @@ def _district_for_code(year: int, code: int) -> District | None:
         if office in LEGISLATIVE_OFFICES and description:
             key = (office, description)
             tally[key] = tally.get(key, 0) + 1
+
+    if not tally:
+        # Every filer on the roster has since sought a different seat, so none
+        # of them can name this one. The code is still certain -- it is the URL
+        # that just returned this roster -- so only the name is missing, and the
+        # filings themselves still carry it.
+        return _district_from_filings(year, code, cpf_ids)
+
+    (office, description), _ = max(tally.items(), key=lambda kv: kv[1])
+    return District(code=code, office=office, description=description)
+
+
+def _district_from_filings(
+    year: int, code: int, cpf_ids: list[int]
+) -> District | None:
+    """Name `code` from what its roster's filings for `year` called the seat.
+
+    Reached only when `_district_for_code`'s filer tally came up empty, which
+    happens whenever every candidate who sought the seat has since sought a
+    different one. Senate 104 is the live case: it is populated in every year
+    `finsummaries` covers, but only 2010 and 2011 have a filer who stayed put,
+    so the four remaining years were unresolvable on the filer tally alone.
+
+    `reports.offices_sought_in_year` is era-correct where
+    `filer/{cpfId}.officeSought` is not. Tallying across the whole roster rather
+    than trusting one filer keeps a candidate who switched seats mid-year from
+    naming the seat by themselves.
+
+    Returns None when the filings name nothing legislative for the year. That is
+    an absence of evidence, not proof the district did not exist: the caller
+    must not report it as a district that never was.
+    """
+    from . import reports
+
+    tally: dict[tuple[str, str], int] = {}
+    for cpf_id in cpf_ids:
+        try:
+            offices = reports.offices_sought_in_year(cpf_id, year)
+        except api.OcpfApiError:
+            continue
+        for office_sought in offices:
+            parsed = _parse_office_sought(office_sought)
+            if parsed is None:
+                continue
+            tally[parsed] = tally.get(parsed, 0) + 1
 
     if not tally:
         return None

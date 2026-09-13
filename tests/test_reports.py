@@ -465,3 +465,90 @@ def test_find_stage_report_ignores_other_stages_and_years():
     assert (
         reports.find_stage_report(rows, reports.SpecialStage.GENERAL, 2014)["reportId"] == 2
     )
+
+
+# --------------------------------------------------------------------------
+# Per-filer log access and era-correct district naming
+# --------------------------------------------------------------------------
+
+
+def test_fetch_filer_log_pages_from_a_one_based_start_index(monkeypatch):
+    rows = [_log_row(n) for n in range(1, reports.PAGE_SIZE + 12)]
+    calls: list[dict] = []
+    _install_log(monkeypatch, rows, calls=calls)
+
+    fetched = reports.fetch_filer_log(11448)
+
+    assert len(fetched) == len(rows)
+    # Filtered by cpfId, and paged from 1 then 1+PAGE_SIZE -- never from 0,
+    # where the live log silently returns PAGE_SIZE-1 rows.
+    assert [c["CpfId"] for c in calls] == [11448, 11448]
+    assert [c["StartIndex"] for c in calls] == [1, 1 + reports.PAGE_SIZE]
+    # It stopped on the short page rather than requesting a third.
+    assert len(calls) == 2
+
+
+def test_offices_sought_in_year_separates_two_seats_by_period(monkeypatch):
+    # The cpfId 11448 shape: one filer, two seats, distinguishable only by when
+    # each filing was made. `filer/{cpfId}` would report just the later one.
+    rows = [
+        _log_row(1, reportingPeriod="1/1/14 - 6/30/14",
+                 officeSought="Senate 1st Plymouth & Bristol"),
+        _log_row(2, reportingPeriod="7/1/14 - 12/31/14",
+                 officeSought="Senate 1st Plymouth & Bristol"),
+        _log_row(3, reportingPeriod="1/1/22 - 6/30/22",
+                 officeSought="Senate 3rd Bristol and Plymouth"),
+    ]
+    _install_log(monkeypatch, rows)
+
+    assert reports.offices_sought_in_year(11448, 2014) == [
+        "Senate 1st Plymouth & Bristol",
+        "Senate 1st Plymouth & Bristol",
+    ]
+    assert reports.offices_sought_in_year(11448, 2022) == [
+        "Senate 3rd Bristol and Plymouth"
+    ]
+
+
+def test_offices_sought_in_year_counts_a_straddling_period_by_its_end(monkeypatch):
+    rows = [
+        _log_row(1, reportingPeriod="11/1/13 - 1/31/14",
+                 officeSought="Senate 1st Plymouth & Bristol"),
+    ]
+    _install_log(monkeypatch, rows)
+
+    assert reports.offices_sought_in_year(11448, 2014) == [
+        "Senate 1st Plymouth & Bristol"
+    ]
+    assert reports.offices_sought_in_year(11448, 2013) == []
+
+
+def test_offices_sought_in_year_drops_rows_with_an_unreadable_period(monkeypatch):
+    # A window that cannot be read cannot be placed in a year, so it is dropped
+    # rather than guessed into one.
+    rows = [
+        _log_row(1, reportingPeriod="1/13/26",
+                 officeSought="Senate 1st Plymouth & Bristol"),
+        _log_row(2, reportingPeriod="", officeSought="Senate 1st Plymouth & Bristol"),
+    ]
+    _install_log(monkeypatch, rows)
+
+    assert reports.offices_sought_in_year(11448, 2026) == []
+
+
+def test_offices_sought_in_year_ignores_amendment_generations_money(monkeypatch):
+    # The log returns every amendment generation; they differ in money but carry
+    # the same office string. Reading the office is safe where reading the money
+    # (which identifies a version, not a candidate) is not.
+    rows = [
+        _log_row(1, reportingPeriod="1/1/14 - 6/30/14",
+                 officeSought="Senate 1st Plymouth & Bristol",
+                 receiptTotal="$9,940.00"),
+        _log_row(2, reportingPeriod="1/1/14 - 6/30/14",
+                 officeSought="Senate 1st Plymouth & Bristol",
+                 receiptTotal="$13,530.00", amendmentDisplay="<br>Amendment"),
+    ]
+    _install_log(monkeypatch, rows)
+
+    offices = reports.offices_sought_in_year(11448, 2014)
+    assert set(offices) == {"Senate 1st Plymouth & Bristol"}

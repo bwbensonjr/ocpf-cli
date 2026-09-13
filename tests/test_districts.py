@@ -253,6 +253,29 @@ def test_sweep_visits_senate_before_house(monkeypatch):
     assert order.index(senate_codes[0]) < order.index(house_codes[0])
 
 
+def test_sweep_covers_retired_codes_below_the_current_senate_floor(monkeypatch):
+    """Senate 104 is retired and sits *below* the current map's floor of 105.
+
+    The range was once widened only at the top, which left 1st Plymouth &
+    Bristol — populated in every year `finsummaries` covers — unreachable for
+    every pre-2021 year.
+    """
+    visited: list = []
+
+    def fake_for_code(year, code):
+        visited.append(code)
+        if code == 104:
+            return District(code=104, office="Senate", description="1st Plymouth & Bristol")
+        return None
+
+    monkeypatch.setattr(districts, "_district_for_code", fake_for_code)
+    found = districts.sweep_historical_districts(
+        2010, districts._normalize("1st Plymouth and Bristol")
+    )
+    assert found is not None and found.code == 104
+    assert 104 in visited
+
+
 def test_sweep_stops_at_the_first_match(monkeypatch):
     visited: list = []
 
@@ -289,6 +312,151 @@ def test_district_for_code_prefers_the_label_most_filers_report(monkeypatch):
     found = REAL_DISTRICT_FOR_CODE(2010, 140)
     assert found is not None
     assert (found.code, found.description) == (140, "Worcester & Norfolk")
+
+
+# --- naming a swept code from the filings (tier 4 fallback) ---
+
+
+def _install_filings_case(monkeypatch, roster, *, current_offices, logs):
+    """Wire `_district_for_code`'s three data sources for one code.
+
+    `roster` is the finsummaries cpfId list, `current_offices` what each filer
+    reports today (`filer/{cpfId}`), `logs` what their filings said at the time.
+    Returns the list that records each log lookup, so a test can assert cost.
+    """
+    import ocpf_cli.legislative as legislative
+    from ocpf_cli import reports as reports_mod
+
+    monkeypatch.setattr(
+        legislative, "fetch_finsummaries", lambda y, c: [{"cpfId": i} for i in roster]
+    )
+    monkeypatch.setattr(
+        districts.api,
+        "get_json",
+        lambda path, params=None, **kw: {
+            "officeSought": current_offices[int(path.split("/")[-1])]
+        },
+    )
+    log_calls: list[tuple[int, int]] = []
+
+    def fake_offices(cpf_id, year):
+        log_calls.append((cpf_id, year))
+        return logs.get(cpf_id, [])
+
+    monkeypatch.setattr(reports_mod, "offices_sought_in_year", fake_offices)
+    return log_calls
+
+
+def test_swept_code_is_named_from_filings_when_every_filer_moved_on(monkeypatch):
+    """Senate 104 in 2014: Pacheco now reports 170, Rosa 157.
+
+    Neither can name the seat they contested, but both filed for it that year
+    and those filings still say what it was called.
+    """
+    log_calls = _install_filings_case(
+        monkeypatch,
+        roster=[11448, 15700],
+        current_offices={
+            11448: {"districtCode": 170, "officeDescription": "Senate",
+                    "districtDescription": "3rd Bristol and Plymouth"},
+            15700: {"districtCode": 157, "officeDescription": "Senate",
+                    "districtDescription": "Berkshire, Hampden, Franklin and Hampshire"},
+        },
+        logs={
+            11448: ["Senate 1st Plymouth & Bristol"] * 4,
+            15700: ["Senate 1st Plymouth & Bristol"] * 2,
+        },
+    )
+
+    found = REAL_DISTRICT_FOR_CODE(2014, 104)
+
+    assert found is not None
+    assert (found.code, found.office, found.description) == (
+        104,
+        "Senate",
+        "1st Plymouth & Bristol",
+    )
+    assert log_calls == [(11448, 2014), (15700, 2014)]
+
+
+def test_filings_tally_spans_the_roster_not_one_filer(monkeypatch):
+    """A filer who switched seats mid-year must not name the seat alone."""
+    _install_filings_case(
+        monkeypatch,
+        roster=[1, 2, 3],
+        current_offices={
+            i: {"districtCode": 999, "officeDescription": "Senate",
+                "districtDescription": "Somewhere Else"}
+            for i in (1, 2, 3)
+        },
+        logs={
+            # One filer files under both seats; the other two only the real one.
+            1: ["Senate 1st Plymouth & Bristol", "Senate 3rd Bristol and Plymouth"],
+            2: ["Senate 1st Plymouth & Bristol"],
+            3: ["Senate 1st Plymouth & Bristol"],
+        },
+    )
+
+    found = REAL_DISTRICT_FOR_CODE(2014, 104)
+    assert found is not None and found.description == "1st Plymouth & Bristol"
+
+
+def test_an_empty_roster_costs_no_log_request(monkeypatch):
+    """Most codes in the swept range are empty; they must stay free.
+
+    The sweep probes ~76 Senate and ~164 House codes, so a fallback that fired
+    on every empty one would make tier 4 far more expensive than it is today.
+    """
+    log_calls = _install_filings_case(
+        monkeypatch, roster=[], current_offices={}, logs={}
+    )
+
+    assert REAL_DISTRICT_FOR_CODE(2014, 104) is None
+    assert log_calls == []
+
+
+def test_a_code_its_filers_still_name_costs_no_log_request(monkeypatch):
+    """Senate 104 in 2010: Pottier and Saade never moved, so the tally answers."""
+    log_calls = _install_filings_case(
+        monkeypatch,
+        roster=[11448, 15039, 15231],
+        current_offices={
+            11448: {"districtCode": 170, "officeDescription": "Senate",
+                    "districtDescription": "3rd Bristol and Plymouth"},
+            15039: {"districtCode": 104, "officeDescription": "Senate",
+                    "districtDescription": "1st Plymouth & Bristol"},
+            15231: {"districtCode": 104, "officeDescription": "Senate",
+                    "districtDescription": "1st Plymouth & Bristol"},
+        },
+        logs={},
+    )
+
+    found = REAL_DISTRICT_FOR_CODE(2010, 104)
+
+    assert found is not None and found.code == 104
+    assert found.description == "1st Plymouth & Bristol"
+    assert log_calls == []
+
+
+def test_a_code_the_filings_cannot_name_yields_no_district(monkeypatch):
+    """Absence of evidence: no name, so no match -- but see the caller.
+
+    `_district_for_code` returning None means "this code could not be named",
+    which the sweep treats as "not the district you asked for". It must never be
+    read as proof the district did not exist that year.
+    """
+    _install_filings_case(
+        monkeypatch,
+        roster=[1],
+        current_offices={
+            1: {"districtCode": 999, "officeDescription": "Senate",
+                "districtDescription": "Somewhere Else"}
+        },
+        # Filed nothing legislative that year -- a municipal race, say.
+        logs={1: ["Mayoral Westfield"]},
+    )
+
+    assert REAL_DISTRICT_FOR_CODE(2014, 104) is None
 
 
 # --- error messages ---
