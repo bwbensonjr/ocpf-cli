@@ -55,13 +55,7 @@ MAX_PAGES = 100
 
 def _parse_date(value: Any) -> date | None:
     """Parse OCPF's `M/D/YYYY` date string. Unparseable input yields None."""
-    if not isinstance(value, str):
-        return None
-    try:
-        month, day, year = (int(part) for part in value.strip().split("/"))
-        return date(year, month, day)
-    except (ValueError, TypeError):
-        return None
+    return render.parse_date(value)
 
 
 def _looks_like_receipt(item: dict) -> bool:

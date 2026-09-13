@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import date
 from typing import Any, Sequence
 
 
@@ -53,6 +54,22 @@ def parse_currency(value: str | float | int | None) -> float:
         return float(cleaned)
     except ValueError:
         return 0.0
+
+
+def parse_date(value: Any) -> date | None:
+    """Parse OCPF's `M/D/YYYY` date string. Unparseable input yields None.
+
+    Every date the API returns uses this shape, across the item-search and
+    report endpoints alike, so the parse lives here beside `parse_currency`
+    rather than once per client module.
+    """
+    if not isinstance(value, str):
+        return None
+    try:
+        month, day, year = (int(part) for part in value.strip().split("/"))
+        return date(year, month, day)
+    except (ValueError, TypeError):
+        return None
 
 
 def render_table(

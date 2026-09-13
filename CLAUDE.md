@@ -17,9 +17,11 @@ src/ocpf_cli/
   districts.py      # district name/code -> code resolution
   resolve.py        # filer arg (cpfId or legislative name) -> cpfId
   search.py         # `search/items` client: paging, completeness, shape guards
+  reports.py        # report endpoints: base-type fan-out, paging, not-found
   commands/race.py  # `ocpf race` — fetch/merge/filter/timeline/render
   commands/filer.py # `ocpf filer` — profile, YTD, recent reports
   commands/expenditures.py  # `ocpf expenditures` — payments made
+  commands/reports.py       # `ocpf reports` / `ocpf report` — filings
 tests/              # pytest; API and feeds mocked (respx / monkeypatch)
 ```
 
@@ -50,8 +52,11 @@ drove this design:
 - `filingSchedules/{year}` provides `primaryElectionDate` and
   `generalElectionDate` (timeline context only — money is never split by
   election).
-- Free-text filer name-search endpoints are dead (404). Resolution is
-  district-first.
+- Free-text filer name-search endpoints are dead (404) **except**
+  `reports/log?Name=`, which does a case-insensitive partial match across all
+  filers and returns their reports with `cpfId`, `fullNameReverse` and an
+  era-correct `officeSought`. Resolution in `resolve.py` is still
+  district-first and legislative-only; the log is not wired into it.
 
 ### `search/items` — report line items
 
@@ -94,6 +99,64 @@ when present — it is authoritative, unlike any inference from the raw string.
 
 All of this lives behind `src/ocpf_cli/search.py`; go through it rather than
 calling `api.get_json("search/items", ...)` directly.
+
+### Report endpoints — filed reports and their schedules
+
+A *report* is a filing: the CPF 102 a committee submitted for a reporting
+period. This is the data behind the web UI's `Reports/DisplayReport?id=N` page,
+and it is the only place special-election money is visible — the depository YTD
+feeds carry one cumulative figure per filer per calendar year and are never
+segmented by election, so a February-to-March special window does not exist in
+them.
+
+- `report/{reportId}` (**singular**; `reports/{id}` is a 404) returns one filing
+  in full: header, schedule totals, and the line-item arrays `receipts`,
+  `expenditures`, `oopExpenditures`, `inkindContributions`, `liabilities`,
+  `subvendorPayments`, plus `isAmendment`/`isAmended`,
+  `previousReportId`/`nextReportId` and `ocpfUsReportLink`.
+  **It has no 404**: an id below **39** returns HTTP 400, and a well-formed id
+  that does not exist returns **HTTP 500** with an empty body. Both mean "no
+  such report" — do not report either as an outage.
+- `report/pdf/{reportId}` returns the filed PDF (`application/pdf`).
+- `reports/baseReportTypes/{cpfId}` lists the categories a filer has filed
+  under. A depository committee has up to seven (Principal, Deposit, Year-End
+  Summaries, Reimbursement, Subvendor, Other Periodic, Late Contribution); a
+  non-depository committee typically has one. `[]` means the filer has filed
+  nothing.
+- `reports/reportList/{cpfId}` **requires `BaseReportTypeId`** — without it,
+  HTTP 400 (`"No base report type ID was provided"`). This is why the endpoint
+  notes long listed it as broken; it is not. It takes exactly **one** value: a
+  comma-separated `3,8` returns an empty body and a repeated parameter silently
+  uses the first, so a complete listing means one call per base report type.
+  Returns `{summary: {count, ...}, items: [...]}` with structured `startDate`,
+  `endDate`, integer `reportYear`, `startBalance`/`endBalance`, and
+  `receiptTotal`/`expenditureTotal` as display strings.
+- **`OnlyCurrent` defaults to `true`**, which omits superseded versions of
+  amended filings. cpfId 14819, base type 8: 21 by default, 47 with
+  `OnlyCurrent=false`. cpfId 14454 across all types: 444 vs 517.
+- **`StartIndex` is 1-based and is a record offset, not a page number.** Pages
+  start at `1`, `1+PageSize`, `1+2*PageSize`. `StartIndex=0` returns **HTTP 500**
+  on `reportList` (on `reports/log` it silently returns `PageSize - 1` records
+  instead), and consecutive offsets return overlapping windows. Same trap as
+  `search/items`, sharper edges.
+- `reports/log` is the other way in: one request, every report type, and the
+  **only cross-filer path** in the API (`ReportTypeId`, `Name` and `CpfId`
+  filters, all failing *closed* — an unknown `ReportTypeId` returns `[]`). It is
+  not used by the commands because its rows are built for a web table:
+  `reportingPeriod` arrives in at least three incompatible shapes
+  (`7/1/19 - 12/31/19`, `9/1 - 9/30/2026` with no start year, and a bare
+  `1/13/26` that is not a range) and `amendmentDisplay` contains literal HTML
+  (`<br>Amendment`). It returns the same report set as the `reportList` fan-out
+  (517 each for cpfId 14454). Cross-filer work needs it and must parse those
+  formats; keep that confined to the log path.
+
+Report types carry both a depository and a non-depository spelling of the same
+thing — `Pre-Election Report (Special)` and `Pre-election Report (Special) (ND)`
+— so match `reportTypeDescription` as a case-insensitive substring rather than
+on the undocumented numeric `reportTypeId`.
+
+All of this lives behind `src/ocpf_cli/reports.py`; go through it rather than
+calling `api.get_json("report/...", ...)` directly.
 
 ## Conventions
 

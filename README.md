@@ -175,13 +175,96 @@ Three things to know about the underlying data:
   correct: item search includes out-of-pocket candidate expenditures that the
   YTD bank figure excludes.
 
+### `ocpf reports` / `ocpf report` — the filings themselves
+
+```bash
+ocpf reports <filer> [--type <text>] [--year <year>] [--since <date>] [--until <date>]
+                     [--limit <n>] [--include-superseded] [--resolve-year <year>] [--json]
+ocpf report <report-id> [--schedule <name>]... [--json]
+```
+
+`ocpf reports` lists what a committee has actually filed; `ocpf report` shows
+one filing in full — the same document the OCPF web UI serves at
+`Reports/DisplayReport?id=N`.
+
+This is the only way to see **special-election** money. The year-to-date feeds
+behind `ocpf race` and `ocpf filer` carry one cumulative figure per filer per
+calendar year and are never segmented by election, so a special held in
+February is invisible in them. The filing that covers that window is not:
+
+```console
+$ ocpf reports 14819 --type "pre-election"
+Report  Type                                Period                  Filed       Receipts  Expenditures  Amd
+------  ----------------------------------  ----------------------  ---------  ---------  ------------  -----
+566246  Pre-election Report (ND)            8/23/2014 - 10/17/2014  3/9/2016   $1,075.00       $155.00  amend
+170378  Pre-election Report (Special) (ND)  2/16/2013 - 3/15/2013   5/8/2013   $3,512.97    $10,036.61  amend
+103215  Pre-election Report (ND)            8/30/2008 - 10/17/2008  12/1/2009  $5,580.00     $7,148.83  amend
+
+3 reports
+
+$ ocpf report 170378
+Report     170378
+Type       Pre-election Report (Special) (ND)
+Period     2/16/2013 - 3/15/2013
+Filed      5/8/2013
+Committee  Matewsky Committee
+Candidate  Matewsky, Wayne
+Office     House, 28th Middlesex
+Treasurer  Gerard Osterofsky
+Bank       East Boston Savings
+Amendment  amends report 170376
+
+                               Amount
+-------------------------  ----------
+Start balance               $7,953.94
+Receipts (total)            $3,512.97
+Expenditures (total)       $10,036.61
+End balance                 $1,430.30
+
+https://www.ocpf.us/Reports/DisplayReport?menuHidden=true&id=170378
+```
+
+Notes:
+
+- **A former candidate is reachable by cpfId, not by name.** `<filer>` resolves
+  a name against the *current* legislative field, so someone who left office —
+  or who lost a special and never served — has no name to match, and the error
+  says to pass their cpfId. That is the same limitation `ocpf filer` and
+  `ocpf expenditures` have, and it bites hardest here, because the filings worth
+  reading often belong to exactly those candidates. `ocpf reports 14819` works
+  where `ocpf reports Matewsky` does not.
+- **The listing covers the filer's whole history**, not just the current year —
+  otherwise a 2013 filing would be unreachable unless you already knew to ask
+  for 2013. Narrow it with `--type`, `--year` or `--limit`; a twenty-year
+  depository committee has several hundred reports, mostly routine monthly
+  deposit and bank reports.
+- **`--type` matches the type description as a substring**, which is deliberate:
+  the same report type has a depository and a non-depository spelling
+  (`Pre-Election Report (Special)` and `Pre-election Report (Special) (ND)`) and
+  `--type "pre-election"` gets both.
+- **Date bounds test the reporting period for overlap**, not containment, so
+  `--since 2013-03-01 --until 2013-03-01` finds the filing covering that date.
+- **Superseded filings are hidden by default.** An amended filing shows once, as
+  the operative version; `--include-superseded` adds the replaced versions, and
+  rows are marked `amend` (this filing amends an earlier one) or `amended` (a
+  later filing replaces it).
+- **`--schedule` prints line items** and is repeatable:
+  `receipts`, `expenditures`, `out-of-pocket`, `in-kind`, `liabilities`,
+  `subvendor`. Totals are shown without them by default.
+- **Per-filing totals are not year-to-date totals.** Each row describes its own
+  reporting period, which is what makes a pre-election figure a pre-election
+  figure.
+- The filed PDF is at `https://api.ocpf.us/report/pdf/<report-id>`.
+
 ## Scope
 
 v1 covers **legislative** races (House and Senate). Other office types
 (statewide, county, mayoral, ballot question) are reachable by cpfId but not by
 name. Contribution and subvendor search, cross-filer vendor search ("every
 committee that paid this firm"), and free-text candidate-name search are out of
-scope. See `openspec/` for the design and specifications.
+scope. Reports are reachable per filer (`ocpf reports <filer>`); cross-filer
+report search — "every pre-election special filed this cycle" — is not yet
+exposed. See `openspec/` for the design and specifications.
 
 ## Development
 

@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `ocpf reports <filer>` lists the reports a committee has filed — pre-election,
+  pre-primary, post-election, special-election, mid-year, year-end, deposit and
+  bank reports — with `--type`, `--year`, `--since`/`--until`, `--limit`,
+  `--include-superseded` and `--json`. The listing covers the filer's whole
+  filing history; `--type` matches the report type as a case-insensitive
+  substring, so `--type "pre-election"` finds both the depository and
+  non-depository spellings of that type.
+- `ocpf report <report-id>` shows one filing in full: header, schedule totals,
+  amendment lineage and the canonical OCPF link, with `--schedule` (repeatable:
+  `receipts`, `expenditures`, `out-of-pocket`, `in-kind`, `liabilities`,
+  `subvendor`) to print line items and `--json` for machine-readable output.
+- Together these are the only way to see **special-election** money: the
+  year-to-date feeds behind `ocpf race` and `ocpf filer` carry one cumulative
+  figure per filer per calendar year and are never segmented by election, so a
+  special election's reporting window does not appear in them.
+
 ## [0.3.0] - 2026-09-04
 
 ### Added
