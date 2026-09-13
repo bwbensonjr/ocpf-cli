@@ -30,7 +30,7 @@ ocpf --help
 ## Usage
 
 ```bash
-ocpf race <district> [--year <year>] [--json]
+ocpf race <district> [--year <year>] [--special] [--stage primary|general] [--json]
 ```
 
 `ocpf race` produces a year-to-date (YTD) financial summary of the legislative
@@ -56,6 +56,8 @@ ocpf race <district> [--year <year>] [--json]
   code) because no year-scoped district list exists. Progress goes to stderr;
   expect roughly 20-30 seconds. Current districts and 2020-onward years are
   unaffected and cost nothing extra.
+- `--special` summarizes a **special election** held that year instead of the
+  regular cycle. See below.
 - `--json` emits the merged, filtered candidate records (including the
   underlying `*Numeric` values) as JSON to stdout. Human status/progress goes
   to stderr, so JSON output stays pipeable.
@@ -84,6 +86,90 @@ Skeens, Juwan         -                $48.02       $90.00        $35.30
 Election dates and the as-of date are **timeline context**. The money is the
 single cumulative YTD figure the API provides for each candidate; it is never
 split into per-primary and per-general amounts.
+
+### Special elections
+
+OCPF's on-ballot and legislative feeds are keyed to the regular election cycle
+and carry no special elections, so a year without a regular contest looks empty:
+
+```bash
+$ ocpf race "6th Bristol" --year 2013
+error: No candidates found for House, 6th Bristol (code 214) in 2013; if a
+special election was held that year, reach it with --special
+```
+
+`--special` builds the field from the candidates' own special-election filings
+instead:
+
+```bash
+$ ocpf race "6th Bristol" --year 2013 --special
+note: a special primary was also held (7/1/2013 - 7/26/2013); see it with --stage primary
+District:  House, 6th Bristol (code 214)
+Election:  special general
+Period:    7/27/2013 - 8/23/2013
+
+Candidate           Raised in Period  Spent in Period
+------------------  ----------------  ---------------
+Steinhof, David           $13,530.00        $6,829.57
+Fiola, Carole              $6,535.00       $22,751.61
+Dennis, David J.           $4,180.00        $4,753.94
+Kilby, Bradford L.         $3,235.00        $3,548.00
+Potvin, Gerald                 $0.00        $1,974.02
+
+Figures are each candidate's operative filing for the period above, not year-to-date.
+OCPF publishes no election date for a special election.
+```
+
+Four things to read carefully in that table:
+
+- **The roster is who *filed*, not who appeared on a ballot.** A candidate who
+  pulled papers for the special and withdrew still filed reports, so they still
+  appear. The primary field is usually larger than the general field, and both
+  are true answers to different questions.
+- **The money covers that stage's window only**, not the whole campaign. A
+  pre-election special report covers the period since the pre-primary one, so
+  adding a candidate's primary and general figures is closer to their campaign
+  total than either alone. For an exact cumulative window, use
+  `ocpf totals <filer> --start ... --end ...`.
+- **`--stage primary` or `--stage general` picks the stage.** With neither, the
+  general is summarized — it is the election, of which the primary is a
+  preliminary round — and a note names the primary if one was held. A district
+  that held only one stage needs no flag.
+- **There is no election date**, because OCPF publishes none for a special
+  (`filingSchedules/2013` returns empty strings for both dates). The header names
+  the period the filings cover, which is sourced, rather than a date inferred
+  from it, which would not be.
+
+`--json` works here too, and carries each candidate's cpfId, the numeric
+receipts and expenditures, the window their own filing covers, and the id of the
+operative report each figure came from:
+
+```bash
+$ ocpf race "6th Bristol" --year 2013 --special --json | jq '.[0]'
+{
+  "cpfId": 15658,
+  "name": "Steinhof, David",
+  "districtCode": 214,
+  "office": "House",
+  "districtDescription": "6th Bristol",
+  "stage": "general",
+  "reportingPeriod": {
+    "start": "2013-07-27",
+    "end": "2013-08-23",
+    "label": "7/27/2013 - 8/23/2013"
+  },
+  "reportingPeriodSpan": { ... },
+  "reportId": 199084,
+  "receipts": 13530.0,
+  "expenditures": 6829.57
+}
+```
+
+A candidate who filed nothing for the stage is shown as `not reported` rather
+than dropped or shown as `$0.00`, and their `receipts` and `reportId` are
+`null`. Figures always come from the **operative** filing: Steinhof amended his
+2013 pre-election report from `$9,940.00` as filed up to `$13,530.00`, and the
+amended figure is the one reported.
 
 ### `ocpf filer` — one candidate's filing summary
 
