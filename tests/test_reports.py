@@ -273,3 +273,195 @@ def test_timeout_stays_an_api_error(monkeypatch):
     monkeypatch.setattr(api, "get_json", fake)
     with pytest.raises(api.OcpfApiError):
         reports.fetch_report(170378)
+
+
+# --------------------------------------------------------------------------
+# Cross-filer special-election sweep (`reports/log`)
+# --------------------------------------------------------------------------
+
+
+def _log_row(n: int, **kwargs) -> dict:
+    row = {
+        "cpfId": 15658,
+        "reportId": n,
+        "reportTypeId": reports.SPECIAL_PRE_ELECTION_TYPE_ID,
+        "reportTypeDescription": "Pre-election Report (Special) (ND)",
+        "reportingPeriod": "7/27/13 - 8/23/13",
+        "fullNameReverse": "Steinhof, David",
+        "officeSought": "House 6th Bristol",
+        "amendmentDisplay": "<br>Amendment",
+        "receiptTotal": "$9,940.00",
+        "expenditureTotal": "$6,329.57",
+    }
+    row.update(kwargs)
+    return row
+
+
+def _install_log(monkeypatch, rows: list[dict], *, calls: list | None = None):
+    """Serve `rows` through a fake get_json that pages like `reports/log`."""
+
+    def fake(path, params=None, **kwargs):
+        assert path == reports.REPORT_LOG_PATH
+        if calls is not None:
+            calls.append(dict(params or {}))
+        start = params["StartIndex"]
+        if start < 1:
+            # The live log silently returns PageSize-1 rows for StartIndex=0,
+            # which is how a 0-based pager corrupts a sweep without erroring.
+            raise AssertionError("StartIndex must be 1-based")
+        size = params["PageSize"]
+        return rows[start - 1 : start - 1 + size]
+
+    monkeypatch.setattr(api, "get_json", fake)
+
+
+@pytest.fixture(autouse=True)
+def _clear_sweep_cache():
+    """The sweep memoizes for the process; tests must not share its result."""
+    reports.fetch_special_reports.cache_clear()
+    yield
+    reports.fetch_special_reports.cache_clear()
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        # The shape every special-election row uses: a two-digit-year range.
+        ("7/27/13 - 8/23/13", (date(2013, 7, 27), date(2013, 8, 23))),
+        ("7/1/2019 - 12/31/2019", (date(2019, 7, 1), date(2019, 12, 31))),
+        # No start year: it comes from the other end of the range.
+        ("9/1 - 9/30/2026", (date(2026, 9, 1), date(2026, 9, 30))),
+    ],
+)
+def test_parse_reporting_period_shapes(value, expected):
+    period = reports.parse_reporting_period(value)
+    assert (period.start, period.end) == expected
+
+
+@pytest.mark.parametrize("value", ["1/13/26", "", "not a period", None, 7])
+def test_parse_reporting_period_rejects_non_ranges(value):
+    # A row whose window cannot be read cannot be placed in an election year,
+    # so it yields None rather than a guess.
+    assert reports.parse_reporting_period(value) is None
+
+
+def test_reporting_period_label_uses_four_digit_years():
+    period = reports.parse_reporting_period("7/27/13 - 8/23/13")
+    assert period.label == "7/27/2013 - 8/23/2013"
+
+
+def test_sweep_pages_from_a_one_based_start_index(monkeypatch):
+    rows = [_log_row(n) for n in range(1, reports.PAGE_SIZE * 2 + 12)]
+    calls: list[dict] = []
+    _install_log(monkeypatch, rows, calls=calls)
+
+    swept = reports.fetch_special_reports(reports.SpecialStage.GENERAL)
+
+    assert len(swept) == len(rows)
+    assert [c["StartIndex"] for c in calls] == [
+        1,
+        1 + reports.PAGE_SIZE,
+        1 + 2 * reports.PAGE_SIZE,
+    ]
+    assert all(c["StartIndex"] != 0 for c in calls)
+    # Every row is returned exactly once: overlapping offsets would duplicate.
+    assert len({row.report_id for row in swept}) == len(rows)
+
+
+def test_sweep_selects_the_stage_report_type(monkeypatch):
+    calls: list[dict] = []
+    _install_log(monkeypatch, [_log_row(1)], calls=calls)
+
+    reports.fetch_special_reports(reports.SpecialStage.PRIMARY)
+
+    assert calls[0]["ReportTypeId"] == reports.SPECIAL_PRE_PRIMARY_TYPE_ID
+
+
+def test_sweep_is_memoized_for_the_process(monkeypatch):
+    calls: list[dict] = []
+    _install_log(monkeypatch, [_log_row(1)], calls=calls)
+
+    first = reports.fetch_special_reports(reports.SpecialStage.GENERAL)
+    second = reports.fetch_special_reports(reports.SpecialStage.GENERAL)
+
+    assert first is second
+    assert len(calls) == 1
+
+
+def test_sweep_carries_no_display_strings(monkeypatch):
+    # Decision 2: the log's money and its HTML amendment marker stop at the
+    # sweep boundary. Money from a log row identifies an amendment generation,
+    # not a candidate's total.
+    _install_log(monkeypatch, [_log_row(1)])
+
+    row = reports.fetch_special_reports(reports.SpecialStage.GENERAL)[0]
+
+    assert not hasattr(row, "receipt_total")
+    assert not hasattr(row, "amendment_display")
+    assert "$" not in repr(row)
+    assert "<br>" not in repr(row)
+    assert row.period == reports.ReportingPeriod(date(2013, 7, 27), date(2013, 8, 23))
+
+
+def test_sweep_drops_rows_without_a_cpf_id_or_office(monkeypatch):
+    _install_log(
+        monkeypatch,
+        [
+            _log_row(1),
+            _log_row(2, cpfId=None),
+            _log_row(3, officeSought=""),
+        ],
+    )
+
+    swept = reports.fetch_special_reports(reports.SpecialStage.GENERAL)
+
+    assert [row.report_id for row in swept] == [1]
+
+
+def test_sweep_keeps_a_row_whose_period_is_unparseable(monkeypatch):
+    _install_log(monkeypatch, [_log_row(1, reportingPeriod="1/13/26")])
+
+    row = reports.fetch_special_reports(reports.SpecialStage.GENERAL)[0]
+
+    assert row.period is None
+
+
+def test_sweep_rejects_a_non_list_response(monkeypatch):
+    monkeypatch.setattr(api, "get_json", lambda path, params=None, **kw: {"items": []})
+
+    with pytest.raises(api.OcpfApiError, match="unexpected response shape"):
+        reports.fetch_special_reports(reports.SpecialStage.GENERAL)
+
+
+def test_find_stage_report_matches_both_filing_regimes():
+    depository = _report(1, reportTypeDescription="Pre-Election Report (Special)")
+    non_depository = _report(2, reportTypeDescription="Pre-election Report (Special) (ND)")
+
+    for row in (depository, non_depository):
+        found = reports.find_stage_report(
+            reports.annotate([row]), reports.SpecialStage.GENERAL, 2013
+        )
+        assert found is row
+
+
+def test_find_stage_report_ignores_other_stages_and_years():
+    rows = reports.annotate(
+        [
+            _report(1, reportTypeDescription="Pre-primary Report (Special) (ND)"),
+            _report(
+                2,
+                reportTypeDescription="Pre-election Report (Special) (ND)",
+                startDate="7/27/2014",
+                endDate="8/23/2014",
+            ),
+            _report(3, reportTypeDescription="Pre-election Report (ND)"),
+        ]
+    )
+
+    assert reports.find_stage_report(rows, reports.SpecialStage.GENERAL, 2013) is None
+    assert (
+        reports.find_stage_report(rows, reports.SpecialStage.PRIMARY, 2013)["reportId"] == 1
+    )
+    assert (
+        reports.find_stage_report(rows, reports.SpecialStage.GENERAL, 2014)["reportId"] == 2
+    )
