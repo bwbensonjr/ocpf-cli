@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **District names now resolve against the map for the requested year.** A
+  district retired at redistricting could not be named even for a year in which
+  it existed: `ocpf race "Worcester and Norfolk" --year 2020` failed as though
+  the name were invalid, though it was a real Senate district through the 2011
+  cycle. OCPF's `districts` reference is the present map only and omits retired
+  codes entirely, so resolution now falls back to the legislative feed's
+  era-correct `officeSought` (2020 onward) and, for earlier years, a sweep of
+  the office's code range labelled from `filer/{cpfId}`. Failure is now reported
+  in terms of the year, naming where the district did exist.
+- Ordinal words are folded to the digit forms the API writes, so
+  `"First Plymouth & Norfolk"` resolves like `"1st Plymouth and Norfolk"`.
+
 ### Added
 
 - `ocpf totals <filer> --start <date> --end <date>` reports the record count and
